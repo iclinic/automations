@@ -1,0 +1,115 @@
+name: 'Declarative Labeler'
+author: 'Brenno Lemos'
+description: 'Action para adicionar e remover labels de PRs e issues baseado em regras declarativas.'
+
+inputs:
+  github_token:
+    description: 'Token do GitHub. Geralmente estará em `secrets.GITHUB_TOKEN`. Necessário porque a API do GitHub necessita de permissões para alterar Pull Requests.'
+    required: true
+  
+  when_approved_count:
+    description: 'TODO'
+    default: 0
+  
+  when_pr_is:
+    description: 'TODO'
+    choices:
+      - draft
+      - ready
+    default: ready
+  
+  then_add_labels:
+    description: 'TODO'
+    default: ''
+  
+  then_remove_labels:
+    description: 'TODO'
+    default: ''
+  
+  also_reverse:
+    description: 'TODO'
+    default: false
+
+runs:
+  using: composite
+  steps:
+
+    - name: Setup | Environment
+      shell: bash
+      run: echo "PASSING=true" >> "$GITHUB_ENV"
+
+    - name: Pre-When | Count Approves
+      id: approved-reviews-counter
+      if: env.PASSING == 'true' && startsWith(github.event_name, 'pull_request') && inputs.when_approved_count > 0
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        approved_reviews_count=$(gh pr view ${{ github.event.pull_request.number }} \
+          --json latestReviews \
+          --jq '.latestReviews | [.[] | select(.state == "APPROVED") | .author.login] | unique | length')
+
+        echo "count=$approved_reviews_count" >> "$GITHUB_OUTPUT"
+
+    - name: When | Approved Count
+      if: env.PASSING == 'true' && steps.approved-reviews-counter.outputs.count < inputs.when_approved_count
+      shell: bash
+      run: echo "PASSING=false" >> "$GITHUB_ENV"
+    
+    - name: When | PR is Draft
+      if: env.PASSING == 'true' && startsWith(github.event_name, 'pull_request') && inputs.when_pr_is == 'draft' && github.event.pull_request.draft == false
+      shell: bash
+      run: echo "PASSING=false" >> "$GITHUB_ENV"
+    
+    - name: When | PR is Ready
+      if: env.PASSING == 'true' && startsWith(github.event_name, 'pull_request') && inputs.when_pr_is == 'ready' && github.event.pull_request.draft == true
+      shell: bash
+      run: echo "PASSING=false" >> "$GITHUB_ENV"
+
+    - name: Then | Add Labels
+      if: env.PASSING == 'true' && startsWith(github.event_name, 'pull_request') && inputs.then_add_labels
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        echo "[Then | Add Labels] DEBUG: (${{ inputs.then_add_labels }})"
+        
+        gh pr --repo '${{ github.repository }}' \
+          edit '${{ github.event.pull_request.number }}' \
+          --add-label '${{ inputs.then_add_labels }}'
+
+    - name: Then | Remove Labels
+      if: env.PASSING == 'true' && startsWith(github.event_name, 'pull_request') && inputs.then_remove_labels
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        echo "[Then | Remove Labels] DEBUG: (${{ inputs.then_remove_labels }})"
+
+        gh pr --repo '${{ github.repository }}' \
+          edit '${{ github.event.pull_request.number }}' \
+          --remove-label '${{ inputs.then_remove_labels }}'
+
+    - name: Reverse-Then | Remove 'Add' Labels
+      if: inputs.also_reverse == 'true' && env.PASSING == 'false' && startsWith(github.event_name, 'pull_request') && inputs.then_add_labels
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        echo "[Invert-Then | Remove 'Add' Labels] DEBUG: (${{ inputs.then_add_labels }})"
+
+        gh pr --repo '${{ github.repository }}' \
+          edit '${{ github.event.pull_request.number }}' \
+          --remove-label '${{ inputs.then_add_labels }}'
+    
+    - name: Reverse-Then | Add 'Remove' Labels
+      if: inputs.also_reverse == 'true' && env.PASSING == 'false' && startsWith(github.event_name, 'pull_request') && inputs.then_remove_labels
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        echo "[Then | Add Labels] DEBUG: (${{ inputs.then_remove_labels }})"
+        
+        gh pr --repo '${{ github.repository }}' \
+          edit '${{ github.event.pull_request.number }}' \
+          --add-label '${{ inputs.then_remove_labels }}'
