@@ -61,7 +61,7 @@ Executa a consequência inversa no caso das condições não serem atendidas. Ne
 
 ---
 
-### Adicionar `waiting QA` e remover `waiting review` quando 2 aprovações forem submetidas
+### Adicionar `waiting QA` e remover `waiting review` quando 2 aprovações forem submetidas (e vice-versa)
 
 ```yml
 on:
@@ -87,3 +87,5 @@ jobs:
           then_remove_labels: waiting review,good first issue
           also_reverse: true
 ```
+
+Neste exemplo, caso as aprovações sejam *dismissed* ou *re-requested*, a action recolocará a label `waiting review` e removerá a label `waiting QA`. Novamente, isso é efeito puramente da linha `also_reverse: true`
