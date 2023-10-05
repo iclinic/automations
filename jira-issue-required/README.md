@@ -4,7 +4,8 @@ Essa action se integra ao Jira para garantir que a branch associada ao Pull Requ
 - find-1
 - feature/find-1
 - bugfix/find-1
-- hotfix/
+- hotfix/find-1
+
 
 
 ## Configuração
