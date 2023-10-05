@@ -28,7 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Mark PR as ready by adding/removing 'waiting review' label
-        uses: iclinic/automations/declarative-labeler
+        uses: iclinic/automations/declarative-labeler@main
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           when_pr_is: ready
@@ -79,7 +79,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Add and Remove 'waiting QA' and 'waiting review' labels
-        uses: iclinic/automations/declarative-labeler
+        uses: iclinic/automations/declarative-labeler@main
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           when_approved_count: 2
