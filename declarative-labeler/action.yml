@@ -104,7 +104,7 @@ runs:
         
         gh pr --repo '${{ github.repository }}' \
           edit '${{ github.event.pull_request.number }}' \
-          --add-label ${{ env.SIDE_EFFECT_ADD_LABELS }}
+          --add-label "${{ env.SIDE_EFFECT_ADD_LABELS }}"
 
     - name: Then | Remove Labels
       if: env.TRIGGER_SIDE_EFFECTS == 'true' && startsWith(github.event_name, 'pull_request') && env.SIDE_EFFECT_REMOVE_LABELS
@@ -116,4 +116,4 @@ runs:
 
         gh pr --repo '${{ github.repository }}' \
           edit '${{ github.event.pull_request.number }}' \
-          --remove-label ${{ env.SIDE_EFFECT_REMOVE_LABELS }}
+          --remove-label "${{ env.SIDE_EFFECT_REMOVE_LABELS }}"
