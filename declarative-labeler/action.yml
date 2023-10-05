@@ -8,26 +8,30 @@ inputs:
     required: true
   
   when_approved_count:
-    description: 'TODO'
+    description: 'Número de aprovações necessário para a action passar. Se for 0, não será necessário nenhuma aprovação. O padrão é 0.'
     default: 0
   
   when_pr_is:
-    description: 'TODO'
+    description: 'Checa se o PR é draft ou não. Os valores aceitos são `draft` e `ready`. O padrão é `ready`.'
     choices:
       - draft
       - ready
     default: ready
   
   then_add_labels:
-    description: 'TODO'
+    description: 'Uma string separada por vírgulas (sem espaços entre elementos) com os nomes dos labels que serão adicionados. O padrão é vazio, ou seja, nenhum.'
     default: ''
   
   then_remove_labels:
-    description: 'TODO'
+    description: 'Uma string separada por vírgulas (sem espaços entre elementos) com os nomes dos labels que serão removidos. O padrão é vazio, ou seja, nenhum.'
     default: ''
   
   also_reverse:
-    description: 'TODO'
+    description: |
+      Define se a action também deve rodar em modo reverso. Se sim, a action inverterá os labels a serem adicinados e removidos no caso de alguma condição falhar.
+      Por exemplo, quando `true`, a action pode ser utilizada para adicionar o label `waiting QA` e remover o label `waiting review`, quando o PR é aprovado 2 vezes,
+      mas que também remove os label `waiting QA` e adiciona o label `waiting review` de volta quando uma ou mais das aprovações são *dismissed*. O padrão é `false`.
+
     default: false
 
 runs:
