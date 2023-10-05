@@ -32,7 +32,7 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           when_pr_is: ready
-          then_add_labels: 'waiting review'
+          then_add_labels: waiting review
           also_reverse: true
 ```
 
@@ -69,7 +69,7 @@ on:
     types:
       - submitted
       - dismissed
-  
+
   pull_request:
     types:
       - review_requested
@@ -83,8 +83,7 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           when_approved_count: 2
-          then_add_labels: 'waiting QA'
-          then_remove_labels: 'waiting review'
+          then_add_labels: waiting QA,has dependencies
+          then_remove_labels: waiting review,good first issue
           also_reverse: true
-
 ```
