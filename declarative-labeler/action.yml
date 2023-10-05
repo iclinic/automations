@@ -53,7 +53,8 @@ runs:
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
-        approved_reviews_count=$(gh pr view ${{ github.event.pull_request.number }} \
+        approved_reviews_count=$(gh pr --repo '${{ github.repository }}' \
+          view ${{ github.event.pull_request.number }} \
           --json latestReviews \
           --jq '.latestReviews | [.[] | select(.state == "APPROVED") | .author.login] | unique | length')
 
