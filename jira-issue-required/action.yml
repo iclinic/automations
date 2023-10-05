@@ -9,7 +9,7 @@ inputs:
   jira_user_email:
     required: true
     description: your_user@your_domain.com
-  jira_api_token: ${{ secrets.JIRA_API_TOKEN }}
+  jira_api_token:
     required: true
     description: Create one at https://id.atlassian.com/manage-profile/security/api-tokens
 
