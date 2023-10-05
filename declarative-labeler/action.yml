@@ -72,8 +72,6 @@ runs:
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
-        echo "[Then | Add Labels] DEBUG: (${{ inputs.then_add_labels }})"
-        
         gh pr --repo '${{ github.repository }}' \
           edit '${{ github.event.pull_request.number }}' \
           --add-label '${{ inputs.then_add_labels }}'
@@ -84,8 +82,6 @@ runs:
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
-        echo "[Then | Remove Labels] DEBUG: (${{ inputs.then_remove_labels }})"
-
         gh pr --repo '${{ github.repository }}' \
           edit '${{ github.event.pull_request.number }}' \
           --remove-label '${{ inputs.then_remove_labels }}'
@@ -96,8 +92,6 @@ runs:
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
-        echo "[Invert-Then | Remove 'Add' Labels] DEBUG: (${{ inputs.then_add_labels }})"
-
         gh pr --repo '${{ github.repository }}' \
           edit '${{ github.event.pull_request.number }}' \
           --remove-label '${{ inputs.then_add_labels }}'
@@ -108,8 +102,6 @@ runs:
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
-        echo "[Then | Add Labels] DEBUG: (${{ inputs.then_remove_labels }})"
-        
         gh pr --repo '${{ github.repository }}' \
           edit '${{ github.event.pull_request.number }}' \
           --add-label '${{ inputs.then_remove_labels }}'
