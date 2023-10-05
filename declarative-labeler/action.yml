@@ -80,10 +80,10 @@ runs:
       if: env.PASSING == 'false' && inputs.also_reverse == 'true'
       shell: bash
       run: |
-        user_requested_add_labels='${{ env.SIDE_EFFECT_ADD_LABELS }}'
-        user_requested_remove_labels='${{ env.SIDE_EFFECT_REMOVE_LABELS }}'
-
         # This is already quoted because of the setup step
+        user_requested_add_labels=${{ env.SIDE_EFFECT_ADD_LABELS }}
+        user_requested_remove_labels=${{ env.SIDE_EFFECT_REMOVE_LABELS }}
+
         echo "SIDE_EFFECT_ADD_LABELS=$user_requested_remove_labels" >> "$GITHUB_ENV"
         echo "SIDE_EFFECT_REMOVE_LABELS=$user_requested_add_labels" >> "$GITHUB_ENV"
 
