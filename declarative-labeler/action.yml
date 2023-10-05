@@ -43,8 +43,8 @@ runs:
       run: |
         echo "PASSING=true" >> "$GITHUB_ENV"
         echo "TRIGGER_SIDE_EFFECTS=false" >> "$GITHUB_ENV"
-        echo "SIDE_EFFECT_ADD_LABELS='${{ inputs.then_add_labels }}'" >> "$GITHUB_ENV"
-        echo "SIDE_EFFECT_REMOVE_LABELS='${{ inputs.then_remove_labels }}'" >> "$GITHUB_ENV"
+        echo "SIDE_EFFECT_ADD_LABELS=${{ inputs.then_add_labels }}" >> "$GITHUB_ENV"
+        echo "SIDE_EFFECT_REMOVE_LABELS=${{ inputs.then_remove_labels }}" >> "$GITHUB_ENV"
 
     - name: Pre-When | Count Approves
       id: approved-reviews-counter
