@@ -9,7 +9,26 @@ Essa action se integra ao Jira para garantir que a branch associada ao Pull Requ
 
 
 ## Configuração
-1. Nos secrets do repositório que estiver usando configure três variáveis:
+1. Veja se as settings abaixo que estão no nível de organização foram herdadas para seu repositório, caso contrário, inclua seu repositório aqui nos `Repository access` de cada uma delas em https://github.com/organizations/iclinic/settings/secrets/actions/<SECRET_NAME>
 - JIRA_BASE_URL: Com o valor `https://<sua org>.atlassian.net`;
 - JIRA_USER_EMAIL: Um email de um user que acesso ao Jira para validar se o card exista;
 - JIRA_API_TOKEN: Token criado para este fim deve ser criado em [API Tokens](https://id.atlassian.com/manage-profile/security/api-tokens);
+
+2. Dentro do seu repositório que usará o workflow, crie o arquivo `.github/workflows/jira-issue-required.yml` com o seguinte conteúdo
+```yml
+on:
+  pull_request:
+    branches:
+      - '**'
+
+jobs:
+  jira_issue_required:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Whether PR/commit is associated to a Jira issue
+        uses: iclinic/automations/jira-issue-required@v1
+        with:
+          jira_base_url: ${{ secrets.JIRA_BASE_URL }}
+          jira_user_email: ${{ secrets.JIRA_USER_EMAIL }}
+          jira_api_token: ${{ secrets.JIRA_API_TOKEN }}
+```
