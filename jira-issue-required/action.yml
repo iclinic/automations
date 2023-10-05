@@ -2,16 +2,6 @@ name: 'Jira Issue Required'
 author: 'José Luis da Cruz Junior'
 description: 'Action para garantir que o merge só seja permitido quando a branch do PR estiver associada a um card do Jira.'
 
-on:
-  inputs:
-      main-branch-name:
-        required: true
-        type: string
-  push:
-    branches: [ ${{ inputs.main-branch-name }} ]
-  pull_request:
-    branches: [ ${{ inputs.main-branch-name }} ]
-
 runs:
   using: composite
   steps:
