@@ -18,8 +18,13 @@ Essa action se integra ao Jira para garantir que a branch associada ao Pull Requ
 ```yml
 on:
   pull_request:
+    types:
+      - opened
+
+  push:
     branches:
       - '**'
+      - '!main'
 
 jobs:
   jira_issue_required:
