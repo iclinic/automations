@@ -7,9 +7,14 @@ inputs:
     description: 'Token do GitHub. Geralmente estará em `secrets.GITHUB_TOKEN`. Necessário porque a API do GitHub necessita de permissões para alterar Pull Requests.'
     required: true
   
-  when_approved:
-    description: 'Checa se o PR foi aprovado ou não, considerando o número mínimo de reviews configuradas no repositório. O Padrão é `false`.'
-    default: false
+  when_review_status:
+    description: 'Checa o status de aprovação do PR. O status de aprovação só é disparado caso o número de reviews configuradas no repositório seja atendida. Por padrão, é ignorado.'
+    choices:
+      - APPROVED
+      - REVIEW_REQUIRED
+      - CHANGES_REQUESTED
+      - ignore
+    default: ignore
   
   when_pr_is:
     description: 'Checa se o PR é draft ou não. Os valores aceitos são `draft` e `ready`. O padrão é `ready`.'
@@ -48,7 +53,7 @@ runs:
 
     - name: Pre-When | Check if Review Decision is Approved
       id: review-decision
-      if: env.PASSING == 'true' && startsWith(github.event_name, 'pull_request') && inputs.when_approved == 'true'
+      if: env.PASSING == 'true' && startsWith(github.event_name, 'pull_request') && inputs.when_review_status != 'ignore'
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
@@ -60,7 +65,7 @@ runs:
         echo "review_decision=$review_decision" >> "$GITHUB_OUTPUT"
 
     - name: When | Approved
-      if: env.PASSING == 'true' && steps.review-decision.outputs.review_decision != 'APPROVED'
+      if: env.PASSING == 'true' && steps.review-decision.outputs.review_decision != inputs.when_review_status
       shell: bash
       run: echo "PASSING=false" >> "$GITHUB_ENV"
     
