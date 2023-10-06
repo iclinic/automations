@@ -61,7 +61,7 @@ Executa a consequência inversa no caso das condições não serem atendidas. Ne
 
 ---
 
-### Adicionar `waiting QA` e remover `waiting review` quando 2 aprovações forem submetidas (e vice-versa)
+### Adicionar `waiting QA` e remover `waiting review` quando o PR for aprovado (e o contrário quando as revisões forem removidas)
 
 ```yml
 on:
@@ -82,7 +82,7 @@ jobs:
         uses: iclinic/automations/declarative-labeler@v1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          when_approved_count: 2
+          when_review_status: APPROVED
           then_add_labels: waiting QA,has dependencies
           then_remove_labels: waiting review,good first issue
           also_reverse: true
