@@ -7,9 +7,9 @@ inputs:
     description: 'Token do GitHub. Geralmente estará em `secrets.GITHUB_TOKEN`. Necessário porque a API do GitHub necessita de permissões para alterar Pull Requests.'
     required: true
   
-  when_approved_count:
-    description: 'Número de aprovações necessário para a action passar. Se for 0, não será necessário nenhuma aprovação. O padrão é 0.'
-    default: 0
+  when_approved:
+    description: 'Checa se o PR foi aprovado ou não, considerando o número mínimo de reviews configuradas no repositório. O Padrão é `false`.'
+    default: false
   
   when_pr_is:
     description: 'Checa se o PR é draft ou não. Os valores aceitos são `draft` e `ready`. O padrão é `ready`.'
@@ -46,22 +46,21 @@ runs:
         echo "SIDE_EFFECT_ADD_LABELS=${{ inputs.then_add_labels }}" >> "$GITHUB_ENV"
         echo "SIDE_EFFECT_REMOVE_LABELS=${{ inputs.then_remove_labels }}" >> "$GITHUB_ENV"
 
-    - name: Pre-When | Count Approves
-      id: approved-reviews-counter
-      if: env.PASSING == 'true' && startsWith(github.event_name, 'pull_request') && inputs.when_approved_count > 0
+    - name: Pre-When | Check if Review Decision is Approved
+      id: review-decision
+      if: env.PASSING == 'true' && startsWith(github.event_name, 'pull_request') && inputs.when_approved == 'true'
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
-        approved_reviews_count=$(gh pr --repo '${{ github.repository }}' \
+        review_decision=$(gh pr --repo '${{ github.repository }}' \
           view ${{ github.event.pull_request.number }} \
-          --json latestReviews \
-          --jq '.latestReviews | [.[] | select(.state == "APPROVED") | .author.login] | unique | length')
+          --json reviewDecision --jq .reviewDecision)
+        
+        echo "review_decision=$review_decision" >> "$GITHUB_OUTPUT"
 
-        echo "count=$approved_reviews_count" >> "$GITHUB_OUTPUT"
-
-    - name: When | Approved Count
-      if: env.PASSING == 'true' && steps.approved-reviews-counter.outputs.count < inputs.when_approved_count
+    - name: When | Approved
+      if: env.PASSING == 'true' && steps.review-decision.outputs.review_decision != 'APPROVED'
       shell: bash
       run: echo "PASSING=false" >> "$GITHUB_ENV"
     
