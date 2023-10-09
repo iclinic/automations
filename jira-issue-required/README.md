@@ -14,6 +14,9 @@ Essa action se integra ao Jira para garantir que a branch associada ao Pull Requ
 - JIRA_USER_EMAIL: Um email de um user que acesso ao Jira para validar se o card exista;
 - JIRA_API_TOKEN: Token criado para este fim deve ser criado em [API Tokens](https://id.atlassian.com/manage-profile/security/api-tokens);
 
+Opcional:
+- `possible_issue_reference`: Este parâmetro pode ser usado para sobrescrever a string sob a qual a action procurará a *issue reference*. Por padrão, é o nome da branch.
+
 2. Dentro do seu repositório que usará o workflow, crie o arquivo `.github/workflows/jira-issue-required.yml` com o seguinte conteúdo
 ```yml
 on:
