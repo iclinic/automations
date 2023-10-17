@@ -1,0 +1,30 @@
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: write
+
+jobs:
+  bump-tags-semver:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Update Minor Tag
+        shell: bash
+        run: |
+          MINOR_TAG=$(echo '${{ github.event.release.tag_name }}' | grep -Po 'v\d+\.\d+')
+          git tag -f "$MINOR_TAG"
+
+      - name: Update Major Tag
+        shell: bash
+        run: |
+          MAJOR_TAG=$(echo '${{ github.event.release.tag_name }}' | grep -Po 'v\d+')
+          git tag -f "$MAJOR_TAG"
+
+      - name: Push Changes
+        shell: bash
+        run: git push -f --tags
