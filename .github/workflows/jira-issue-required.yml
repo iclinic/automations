@@ -1,0 +1,23 @@
+on:
+  pull_request:
+    types:
+      - opened
+
+  push:
+    branches:
+      - '**'
+      - '!main'
+
+jobs:
+  jira_issue_required:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Automations Repository
+        uses: actions/checkout@v4
+
+      - name: Check Whether PR/commit is associated to a Jira issue
+        uses: ./jira-issue-required
+        with:
+          jira_base_url: ${{ secrets.JIRA_BASE_URL }}
+          jira_user_email: ${{ secrets.JIRA_USER_EMAIL }}
+          jira_api_token: ${{ secrets.JIRA_API_TOKEN }}
