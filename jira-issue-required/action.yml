@@ -46,6 +46,7 @@ runs:
       uses: atlassian/gajira-find-issue-key@v3
       with:
         string: ${{ env.POSSIBLE_ISSUE_REFERENCE }}
+        from: 
     
     - name: Fail if not found
       if: steps.find-issue-key.outputs.issue == '' || steps.find-issue-key.outputs.issue == null
