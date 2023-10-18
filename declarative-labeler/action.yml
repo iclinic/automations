@@ -64,8 +64,8 @@ runs:
         
         echo "review_decision=$review_decision" >> "$GITHUB_OUTPUT"
 
-    - name: When | Approved
-      if: env.PASSING == 'true' && steps.review-decision.outputs.review_decision != inputs.when_review_status
+    - name: When | Review Status
+      if: env.PASSING == 'true' && steps.review-decision.outputs.review_decision && steps.review-decision.outputs.review_decision != inputs.when_review_status
       shell: bash
       run: echo "PASSING=false" >> "$GITHUB_ENV"
     
