@@ -42,6 +42,14 @@ runs:
         JIRA_API_TOKEN: ${{ inputs.jira_api_token }}
 
     - name: Find Issue Key
+      id: find-issue-key
       uses: atlassian/gajira-find-issue-key@v3
       with:
         string: ${{ env.POSSIBLE_ISSUE_REFERENCE }}
+    
+    - name: Fail if not found
+      if: steps.find-issue-key.outputs.issue == '' || steps.find-issue-key.outputs.issue == null
+      shell: bash
+      run: |
+        echo "Issue not found in '${{ env.POSSIBLE_ISSUE_REFERENCE }}'!"
+        exit 1
