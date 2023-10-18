@@ -1,0 +1,19 @@
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - ready_for_review
+      - converted_to_draft
+
+jobs:
+  add_waiting_review_label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark PR as ready by adding/removing 'waiting review' label
+        uses: ./declarative-labeler
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          when_pr_is: ready
+          then_add_labels: waiting review
+          also_reverse: true
