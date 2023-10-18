@@ -1,0 +1,25 @@
+on:
+  pull_request_review:
+    types:
+      - submitted
+      - dismissed
+
+  pull_request:
+    types:
+      - review_requested
+
+jobs:
+  juggle_labels_on_approve:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Automations Repository
+        uses: actions/checkout@v4
+
+      - name: Add and Remove 'waiting QA' and 'waiting review' labels
+        uses: ./declarative-labeler
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          when_review_status: APPROVED
+          then_add_labels: waiting QA
+          then_remove_labels: waiting review
+          also_reverse: true
