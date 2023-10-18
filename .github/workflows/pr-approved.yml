@@ -12,6 +12,9 @@ jobs:
   juggle_labels_on_approve:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout Automations Repository
+        uses: actions/checkout@v4
+
       - name: Add and Remove 'waiting QA' and 'waiting review' labels
         uses: ./declarative-labeler
         with:
