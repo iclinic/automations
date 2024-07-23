@@ -1,0 +1,12 @@
+on:
+  push:
+    branches: [staging, main]
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+
+jobs:
+  Security:
+    uses: iclinic/gha-templates/.github/workflows/security.yml@main
+    secrets:
+      SONAR_FOUNDATION_TOKEN: ${{ secrets.SONAR_FOUNDATION_TOKEN }}
