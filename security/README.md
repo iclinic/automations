@@ -21,7 +21,14 @@ on:
 
 jobs:
   Security:
-    uses: iclinic/automations/security@v1
-    secrets:
-      SONAR_FOUNDATION_TOKEN: ${{ secrets.SONAR_FOUNDATION_TOKEN }}
+    runs-on: runner-security-${{ github.repository_owner }}
+    steps:
+      - name: Checkout Automations Repository
+        uses: actions/checkout@v4
+
+      - name: Run SonarQube
+        uses: iclinic/automations/security@v1
+        with:
+          sonar_token: ${{ secrets.SONAR_FOUNDATION_TOKEN }}
+
 ```

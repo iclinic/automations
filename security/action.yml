@@ -1,30 +1,31 @@
-name: Security Workflow
+name: Security
+description: 'Run SonarQube Scan'
 
-on:
-  workflow_call:
-    secrets:
-      SONAR_FOUNDATION_TOKEN:
-        required: true
-  workflow_dispatch:
+inputs:
+  sonar_token:
+    description: 'Sonar Token'
+    required: true
 
-jobs:
-  static-application-security-testing:
-    runs-on: runner-security-${{ github.repository_owner }}
-    env:
-      SONAR_HOST_URL: http://sonar.afya.tools:9000/
-      APPLICATION_NAME: ${{ github.event.repository.name }}
-      COMPANY: ${{ github.repository_owner }}
-    steps:
-      - uses: actions/checkout@master
-      - name: SonarQube Scan
-        run: sonar-scanner
-          -Dsonar.dependencyCheck.securityHotspot=true
-          -Dsonar.dependencyCheck.summarize=true
-          -Dsonar.qualitygate.wait=true
-          -Dsonar.projectKey=$COMPANY-$APPLICATION_NAME
-          -Dsonar.projectName=$COMPANY-$APPLICATION_NAME
-          -Dsonar.plugins.downloadOnlyRequired=true
-          -Dsonar.token=${{ secrets.SONAR_FOUNDATION_TOKEN }}
-          -Dsonar.projectBaseDir=${{ github.workspace }}
-          -Dsonar.sources=.
-          -Dsonar.scm.provider=git
+runs:
+  using: composite
+  steps:
+    - name: static-application-security-testing
+      shell: bash
+      run: sonar-scanner
+        -Dsonar.dependencyCheck.securityHotspot=true
+        -Dsonar.dependencyCheck.summarize=true
+        -Dsonar.qualitygate.wait=true
+        -Dsonar.projectKey=$COMPANY-$APPLICATION_NAME
+        -Dsonar.projectName=$COMPANY-$APPLICATION_NAME
+        -Dsonar.plugins.downloadOnlyRequired=true
+        -Dsonar.token=$SONAR_TOKEN
+        -Dsonar.projectBaseDir=${{ github.workspace }}
+        -Dsonar.sources=.
+        -Dsonar.scm.provider=git
+        -Dsonar.sourceEncoding=utf-8
+      env:
+        SONAR_HOST_URL: http://sonar.afya.tools:9000/
+        APPLICATION_NAME: ${{ github.event.repository.name }}
+        COMPANY: ${{ github.repository_owner }}
+        SONAR_TOKEN: ${{ inputs.sonar_token }}
+        GIT_DEPTH: 0
