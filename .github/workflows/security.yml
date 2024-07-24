@@ -3,17 +3,10 @@ on:
     branches: [staging, main]
     tags:
       - '[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
 
 jobs:
   Security:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Automations Repository
-        uses: actions/checkout@v4
-        with:
-          ref: feat/SRE-2460/add-security-and-readme-to-automation
-
-      - name: Add Sonar Integration
-        uses: ./security
-        with:
-          SONAR_FOUNDATION_TOKEN: ${{ secrets.SONAR_FOUNDATION_TOKEN }}
+    uses: iclinic/automations/security@staging
+    secrets:
+      SONAR_FOUNDATION_TOKEN: ${{ secrets.SONAR_FOUNDATION_TOKEN }}

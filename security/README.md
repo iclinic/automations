@@ -10,6 +10,7 @@ Essa action se integra ao Sonar para a analise de código e envio das métricas 
 
 
 3. Dentro do seu repositório que usará o workflow, crie o arquivo `.github/workflows/security.yml` com o seguinte conteúdo
+
 ```yml
 on:
   push:
