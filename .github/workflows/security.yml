@@ -7,6 +7,6 @@ on:
 
 jobs:
   Security:
-    uses: iclinic/gha-templates/.github/workflows/security.yml@main
+    uses: ./security
     secrets:
       SONAR_FOUNDATION_TOKEN: ${{ secrets.SONAR_FOUNDATION_TOKEN }}
