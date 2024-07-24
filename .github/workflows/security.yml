@@ -12,6 +12,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Add Sonar Integration
+        runs-on: runner-security-${{ github.repository_owner }}
         uses: ./security
         secrets:
           SONAR_FOUNDATION_TOKEN: ${{ secrets.SONAR_FOUNDATION_TOKEN }}
