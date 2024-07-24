@@ -7,6 +7,11 @@ on:
 
 jobs:
   Security:
-    uses: ./security
-    secrets:
-      SONAR_FOUNDATION_TOKEN: ${{ secrets.SONAR_FOUNDATION_TOKEN }}
+    steps:
+      - name: Checkout Automations Repository
+        uses: actions/checkout@v4
+
+      - name: Add Sonar Integration
+        uses: ./security
+        secrets:
+          SONAR_FOUNDATION_TOKEN: ${{ secrets.SONAR_FOUNDATION_TOKEN }}

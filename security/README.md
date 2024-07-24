@@ -20,7 +20,7 @@ on:
 
 jobs:
   Security:
-    uses: ./security
+    uses: iclinic/automations/security@v1
     secrets:
       SONAR_FOUNDATION_TOKEN: ${{ secrets.SONAR_FOUNDATION_TOKEN }}
 ```
