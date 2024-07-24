@@ -7,6 +7,12 @@ on:
 
 jobs:
   Security:
-    uses: iclinic/gha-templates/.github/workflows/security.yml@main
-    secrets:
-      SONAR_FOUNDATION_TOKEN: ${{ secrets.SONAR_FOUNDATION_TOKEN }}
+    runs-on: runner-security-${{ github.repository_owner }}
+    steps:
+      - name: Checkout Automations Repository
+        uses: actions/checkout@v4
+
+      - name: Run SonarQube
+        uses: ./security
+        with:
+          sonar_token: ${{ secrets.SONAR_FOUNDATION_TOKEN }}
