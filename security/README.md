@@ -11,11 +11,11 @@ Essa action se integra ao Sonar para a analise de código e envio das métricas 
 ```yml
 on:
   push:
-    branches: [main, master, staging]
+    branches: [main, master, production, staging]
     tags:
       - '[0-9]+.[0-9]+.[0-9]+'
   pull_request:
-    branches: [main, master, staging]
+    branches: [main, master, production, staging]
   workflow_dispatch:
 
 jobs:
@@ -53,11 +53,11 @@ branch = True
 ```yml
 on:
   push:
-    branches: [main, master, staging]
+    branches: [main, master, production, staging]
     tags:
       - '[0-9]+.[0-9]+.[0-9]+'
   pull_request:
-    branches: [main, master, staging]
+    branches: [main, master, production, staging]
   workflow_dispatch:
 
 jobs:
