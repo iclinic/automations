@@ -5,6 +5,38 @@ inputs:
   sonar_token:
     description: 'Sonar Token'
     required: true
+  sonar_sources:
+    description: 'Sonar Sources'
+    default: '.'
+    required: false
+  sonar_qualitygate_wait:
+    description: 'Sonar Quality Gate Wait'
+    default: 'true'
+    required: false
+  sonar_language:
+    description: 'Sonar Language'
+    default: ''
+    required: false
+  sonar_python_version:
+    description: 'Sonar Python Version'
+    default: ''
+    required: false
+  sonar_core_coverage_plugin:
+    description: 'Sonar Core Coverage Plugin'
+    default: ''
+    required: false
+  sonar_python_coverage_reportpaths:
+    description: 'Sonar Python Coverage Report Paths'
+    default: ''
+    required: false
+  sonar_tests:
+    description: 'Sonar Tests Path'
+    default: ''
+    required: false
+  sonar_exclusions:
+    description: 'Sonar Exclusions'
+    default: ''
+    required: false
 
 runs:
   using: composite
@@ -14,15 +46,29 @@ runs:
       run: sonar-scanner
         -Dsonar.dependencyCheck.securityHotspot=true
         -Dsonar.dependencyCheck.summarize=true
-        -Dsonar.qualitygate.wait=true
+        -Dsonar.qualitygate.wait=${{ inputs.sonar_qualitygate_wait }}
         -Dsonar.projectKey=$COMPANY-$APPLICATION_NAME
         -Dsonar.projectName=$COMPANY-$APPLICATION_NAME
         -Dsonar.plugins.downloadOnlyRequired=true
         -Dsonar.token=$SONAR_TOKEN
         -Dsonar.projectBaseDir=${{ github.workspace }}
-        -Dsonar.sources=.
+        -Dsonar.sources=${{ inputs.sonar_sources }}
         -Dsonar.scm.provider=git
         -Dsonar.sourceEncoding=utf-8
+        ${{ github.event_name == 'push' && format('-Dsonar.branch.name={0}', github.ref_name) || '' }}
+        ${{ github.event_name == 'pull_request' && format('-Dsonar.scm.revision={0}', github.event.pull_request.head.sha) || '' }}
+        ${{ github.event_name == 'pull_request' && '-Dsonar.pullrequest.provider=github' || '' }}
+        ${{ github.event_name == 'pull_request' && format('-Dsonar.pullrequest.github.repository={0}', github.repository) || '' }}
+        ${{ github.event_name == 'pull_request' && format('-Dsonar.pullrequest.key={0}', github.event.number) || '' }}
+        ${{ github.event_name == 'pull_request' && format('-Dsonar.pullrequest.branch={0}', github.HEAD_REF) || '' }}
+        ${{ github.event_name == 'pull_request' && format('-Dsonar.pullrequest.base={0}', github.BASE_REF) || '' }}
+        ${{ inputs.sonar_core_coverage_plugin != '' && format('-Dsonar.core.codeCoveragePlugin={0}', inputs.sonar_core_coverage_plugin) || '' }}
+        ${{ inputs.sonar_language != '' && format('-Dsonar.language={0}', inputs.sonar_language) || '' }}
+        ${{ inputs.sonar_python_coverage_reportpaths != '' && format('-Dsonar.python.coverage.reportPaths={0}', inputs.sonar_python_coverage_reportpaths) || '' }}
+        ${{ inputs.sonar_python_version != '' && format('-Dsonar.python.version={0}', inputs.sonar_python_version) || '' }}
+        ${{ inputs.sonar_tests != '' && format('-Dsonar.tests={0}', inputs.sonar_tests) || '' }}
+        ${{ inputs.sonar_tests != '' && format('-Dsonar.tests={0}', inputs.sonar_tests) || '' }}
+        ${{ inputs.sonar_exclusions != '' && format('-Dsonar.exclusions={0}', inputs.sonar_exclusions) || '' }}
       env:
         SONAR_HOST_URL: http://sonar.afya.tools:9000/
         APPLICATION_NAME: ${{ github.event.repository.name }}
