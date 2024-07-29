@@ -55,6 +55,8 @@ runs:
         -Dsonar.sources=${{ inputs.sonar_sources }}
         -Dsonar.scm.provider=git
         -Dsonar.sourceEncoding=utf-8
+        -Dsonar.sources=src/main/java/
+        -Dsonar.java.binaries=target/classes
         ${{ github.event_name == 'push' && format('-Dsonar.branch.name={0}', github.ref_name) || '' }}
         ${{ github.event_name == 'pull_request' && format('-Dsonar.scm.revision={0}', github.event.pull_request.head.sha) || '' }}
         ${{ github.event_name == 'pull_request' && '-Dsonar.pullrequest.provider=github' || '' }}
