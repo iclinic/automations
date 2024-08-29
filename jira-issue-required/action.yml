@@ -2,19 +2,19 @@ name: 'Jira Issue Required'
 author: 'José Luis da Cruz Junior'
 description: 'Action para garantir que o merge só seja permitido quando a branch do PR estiver associada a um card do Jira.'
 
-inputs:
-  jira_base_url:
-    required: true
-    description: https://<your_org>.atlassian.net
-  jira_user_email:
-    required: true
-    description: your_user@your_domain.com
-  jira_api_token:
-    required: true
-    description: Create one at https://id.atlassian.com/manage-profile/security/api-tokens
-  possible_issue_reference:
-    description: Uma string que possivelmente contém o issue no Jira. Pode ser o nome da branch, o título do PR, etc. O padrão é o nome da branch.
-    default: ""
+#inputs:
+  #jira_base_url:
+  #  required: true
+  #  description: https://<your_orga>.atlassian.net
+  #jira_user_email:
+  #  required: true
+  #  description: your_user@your_domain.com
+  #jira_api_token:
+  #  required: true
+  #  description: Create one at https://id.atlassian.com/manage-profile/security/api-tokens
+  #possible_issue_reference:
+  #  description: Uma string que possivelmente contém o issue no Jira. Pode ser o nome da branch, o título do PR, etc. O padrão é o nome da branch.
+  #  default: ""
 
 runs:
   using: composite
