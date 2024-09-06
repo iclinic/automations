@@ -15,6 +15,15 @@ inputs:
   possible_issue_reference:
     description: Uma string que possivelmente contém o issue no Jira. Pode ser o nome da branch, o título do PR, etc. O padrão é o nome da branch.
     default: ""
+  jira_alternative_base_url:
+    required: false
+    description: https://<your_org>.atlassian.net
+  jira_alternative_user_email:
+    required: false
+    description: your_user@your_domain.com
+  jira_alternative_api_token:
+    required: false
+    description: Create one at https://id.atlassian.com/manage-profile/security/api-tokens
 
 runs:
   using: composite
@@ -22,7 +31,9 @@ runs:
 
     - name: Setup | Environment
       shell: bash
-      run: echo "POSSIBLE_ISSUE_REFERENCE=${{ inputs.possible_issue_reference }}" >> "$GITHUB_ENV"
+      run: |
+        echo "POSSIBLE_ISSUE_REFERENCE=${{ inputs.possible_issue_reference }}" >> "$GITHUB_ENV"
+        echo "ISSUE_KEY_FOUND=0" >> "$GITHUB_ENV"
 
     - name: Get Possible Issue Reference - Default / Push Event
       if: env.POSSIBLE_ISSUE_REFERENCE == '' && github.event_name == 'push'
@@ -47,9 +58,39 @@ runs:
       with:
         string: ${{ env.POSSIBLE_ISSUE_REFERENCE }}
         from: 
-    
+
+    - name: Check if issue key exists
+      if: steps.find-issue-key.outputs.issue != ''
+      shell: bash
+      run: |
+        echo "ISSUE_KEY_FOUND=1" >> "$GITHUB_ENV"
+        echo "Issue key found!"
+
+    - name: Jira Login if not found issue key
+      if: env.ISSUE_KEY_FOUND == 0 && inputs.jira_alternative_base_url != '' && inputs.jira_alternative_user_email != '' && inputs.jira_alternative_api_token != ''
+      uses: atlassian/gajira-login@v3
+      env:
+        JIRA_BASE_URL: ${{ inputs.jira_alternative_base_url }}
+        JIRA_USER_EMAIL: ${{ inputs.jira_alternative_user_email }}
+        JIRA_API_TOKEN: ${{ inputs.jira_alternative_api_token }}
+
+    - name: Find in second repository if not found issue key
+      id: find-issue-key-second
+      if: env.ISSUE_KEY_FOUND == 0 && inputs.jira_alternative_base_url != '' && inputs.jira_alternative_user_email != '' && inputs.jira_alternative_api_token != ''
+      uses: atlassian/gajira-find-issue-key@v3
+      with:
+        string: ${{ env.POSSIBLE_ISSUE_REFERENCE }}
+        from: 
+
+    - name: Check if issue key exists in alternative Jira
+      if: env.ISSUE_KEY_FOUND == 0 && steps.find-issue-key-second.outputs.issue != ''
+      shell: bash
+      run: |
+        echo "ISSUE_KEY_FOUND=1" >> "$GITHUB_ENV"
+        echo "Issue key found in alternative Jira!"
+
     - name: Fail if not found
-      if: steps.find-issue-key.outputs.issue == '' || steps.find-issue-key.outputs.issue == null
+      if: env.ISSUE_KEY_FOUND == 0
       shell: bash
       run: |
         echo "Issue not found in '${{ env.POSSIBLE_ISSUE_REFERENCE }}'!"
