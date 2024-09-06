@@ -17,7 +17,14 @@ Essa action se integra ao Jira para garantir que a branch associada ao Pull Requ
 Opcional:
 - `possible_issue_reference`: Este parâmetro pode ser usado para sobrescrever a string sob a qual a action procurará a *issue reference*. Por padrão, é o nome da branch.
 
-2. Dentro do seu repositório que usará o workflow, crie o arquivo `.github/workflows/jira-issue-required.yml` com o seguinte conteúdo
+2. Em alguns casos, um repositório tem relação com Jira em organizações diferentes, e para resolver esse problema foi criada uma configuração alternativa de Jira:
+- JIRA_ALTERNATIVE_BASE_URL: Com o valor `https://<sua org>.atlassian.net`;
+- JIRA_ALTERNATIVE_USER_EMAIL: Um email de um user que acesso ao Jira para validar se o card exista;
+- JIRA_ALTERNATIVE_API_TOKEN: Token criado para este fim deve ser criado em [API Tokens](https://id.atlassian.com/manage-profile/security/api-tokens);
+
+Essas variáveis são de preenchimento opcional.
+
+3. Dentro do seu repositório que usará o workflow, crie o arquivo `.github/workflows/jira-issue-required.yml` com o seguinte conteúdo
 ```yml
 on:
   pull_request:
@@ -39,4 +46,8 @@ jobs:
           jira_base_url: ${{ secrets.JIRA_BASE_URL }}
           jira_user_email: ${{ secrets.JIRA_USER_EMAIL }}
           jira_api_token: ${{ secrets.JIRA_API_TOKEN }}
+          # configuração opcional:
+          jira_alternative_base_url: ${{ secrets.JIRA_ALTERNATIVE_BASE_URL }}
+          jira_alternative_user_email: ${{ secrets.JIRA_ALTERNATIVE_USER_EMAIL }}
+          jira_alternative_api_token: ${{ secrets.JIRA_ALTERNATIVE_API_TOKEN }}
 ```
