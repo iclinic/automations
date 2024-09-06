@@ -2,19 +2,19 @@ name: 'Jira Issue Required'
 author: 'José Luis da Cruz Junior'
 description: 'Action para garantir que o merge só seja permitido quando a branch do PR estiver associada a um card do Jira.'
 
-#inputs:
-  #jira_base_url:
-  #  required: true
-  #  description: https://<your_orga>.atlassian.net
-  #jira_user_email:
-  #  required: true
-  #  description: your_user@your_domain.com
-  #jira_api_token:
-  #  required: true
-  #  description: Create one at https://id.atlassian.com/manage-profile/security/api-tokens
-  #possible_issue_reference:
-  #  description: Uma string que possivelmente contém o issue no Jira. Pode ser o nome da branch, o título do PR, etc. O padrão é o nome da branch.
-  #  default: ""
+inputs:
+  jira_base_url:
+    required: true
+    description: https://<your_orga>.atlassian.net
+  jira_user_email:
+    required: true
+    description: your_user@your_domain.com
+  jira_api_token:
+    required: true
+    description: Create one at https://id.atlassian.com/manage-profile/security/api-tokens
+  possible_issue_reference:
+    description: Uma string que possivelmente contém o issue no Jira. Pode ser o nome da branch, o título do PR, etc. O padrão é o nome da branch.
+    default: ""
 
 runs:
   using: composite
@@ -24,33 +24,33 @@ runs:
       shell: bash
       run: echo "POSSIBLE_ISSUE_REFERENCE=${{ inputs.possible_issue_reference }}" >> "$GITHUB_ENV"
 
-#    - name: Get Possible Issue Reference - Default / Push Event
-#      if: env.POSSIBLE_ISSUE_REFERENCE == '' && github.event_name == 'push'
-#      shell: bash
-#      run: echo "POSSIBLE_ISSUE_REFERENCE=${{ github.ref_name }}" >> "$GITHUB_ENV"
+    - name: Get Possible Issue Reference - Default / Push Event
+      if: env.POSSIBLE_ISSUE_REFERENCE == '' && github.event_name == 'push'
+      shell: bash
+      run: echo "POSSIBLE_ISSUE_REFERENCE=${{ github.ref_name }}" >> "$GITHUB_ENV"
     
- #   - name: Get Possible Issue Reference - Default / Pull Request Event
- #     if: env.POSSIBLE_ISSUE_REFERENCE == '' && startsWith(github.event_name, 'pull_request')
- #     shell: bash
- #     run: echo "POSSIBLE_ISSUE_REFERENCE=${{ github.head_ref }}" >> "$GITHUB_ENV"
+    - name: Get Possible Issue Reference - Default / Pull Request Event
+      if: env.POSSIBLE_ISSUE_REFERENCE == '' && startsWith(github.event_name, 'pull_request')
+      shell: bash
+      run: echo "POSSIBLE_ISSUE_REFERENCE=${{ github.head_ref }}" >> "$GITHUB_ENV"
 
- #   - name: Jira Login
- #     uses: atlassian/gajira-login@v3
- #     env:
- #       JIRA_BASE_URL: ${{ inputs.jira_base_url }}
- #       JIRA_USER_EMAIL: ${{ inputs.jira_user_email }}
- #       JIRA_API_TOKEN: ${{ inputs.jira_api_token }}
+    - name: Jira Login
+      uses: atlassian/gajira-login@v3
+      env:
+        JIRA_BASE_URL: ${{ inputs.jira_base_url }}
+        JIRA_USER_EMAIL: ${{ inputs.jira_user_email }}
+        JIRA_API_TOKEN: ${{ inputs.jira_api_token }}
 
- #   - name: Find Issue Key
- #     id: find-issue-key
- #     uses: atlassian/gajira-find-issue-key@v3
- #     with:
- #       string: ${{ env.POSSIBLE_ISSUE_REFERENCE }}
- #       from: 
+    - name: Find Issue Key
+      id: find-issue-key
+      uses: atlassian/gajira-find-issue-key@v3
+      with:
+        string: ${{ env.POSSIBLE_ISSUE_REFERENCE }}
+        from: 
     
-#    - name: Fail if not found
-#      if: steps.find-issue-key.outputs.issue == '' || steps.find-issue-key.outputs.issue == null
-#      shell: bash
-#      run: |
-#        echo "Issue not found in '${{ env.POSSIBLE_ISSUE_REFERENCE }}'!"
-#        exit 1
+    - name: Fail if not found
+      if: steps.find-issue-key.outputs.issue == '' || steps.find-issue-key.outputs.issue == null
+      shell: bash
+      run: |
+        echo "Issue not found in '${{ env.POSSIBLE_ISSUE_REFERENCE }}'!"
+        exit 1
