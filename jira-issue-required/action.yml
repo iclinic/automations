@@ -5,7 +5,7 @@ description: 'Action para garantir que o merge só seja permitido quando a branc
 inputs:
   jira_base_url:
     required: true
-    description: https://<your_orga>.atlassian.net
+    description: https://<your_org>.atlassian.net
   jira_user_email:
     required: true
     description: your_user@your_domain.com
