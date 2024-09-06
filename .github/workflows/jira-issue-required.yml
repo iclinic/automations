@@ -21,3 +21,6 @@ jobs:
           jira_base_url: ${{ secrets.JIRA_BASE_URL }}
           jira_user_email: ${{ secrets.JIRA_USER_EMAIL }}
           jira_api_token: ${{ secrets.JIRA_API_TOKEN }}
+          jira_alternative_base_url: ${{ secrets.JIRA_ALTERNATIVE_BASE_URL }}
+          jira_alternative_user_email: ${{ secrets.JIRA_ALTERNATIVE_USER_EMAIL }}
+          jira_alternative_api_token: ${{ secrets.JIRA_ALTERNATIVE_API_TOKEN }}
