@@ -25,6 +25,11 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Setup | Environment
+      shell: bash
+      run: |
+        echo "POSSIBLE_ISSUE_REFERENCE=" >> "$GITHUB_ENV"
+        echo "ISSUE_KEY_FOUND=0" >> "$GITHUB_ENV"
 
     - name: Get Possible Issue Reference - Default / Push Event
       if: env.POSSIBLE_ISSUE_REFERENCE == '' && github.event_name == 'push'
