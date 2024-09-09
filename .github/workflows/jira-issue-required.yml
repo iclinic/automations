@@ -1,12 +1,6 @@
 on:
   pull_request:
-    types:
-      - opened
-
-  push:
-    branches:
-      - '**'
-      - '!main'
+    branches: [main]
 
 jobs:
   jira_issue_required:
