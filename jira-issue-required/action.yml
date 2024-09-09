@@ -43,7 +43,7 @@ runs:
     - name: Get Possible Issue Reference - Default / Pull Request Event
       if: env.POSSIBLE_ISSUE_REFERENCE == '' && startsWith(github.event_name, 'pull_request')
       shell: bash
-      run: echo "POSSIBLE_ISSUE_REFERENCE=${{ github.head_ref }}" >> "$GITHUB_ENV"
+      run: echo "POSSIBLE_ISSUE_REFERENCE=${{ github.head_ref }}${{ github.event.pull_request.title }}" >> "$GITHUB_ENV"
 
     - name: Jira Login
       uses: atlassian/gajira-login@v3
