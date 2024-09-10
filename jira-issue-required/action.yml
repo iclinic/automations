@@ -53,6 +53,7 @@ runs:
       uses: atlassian/gajira-find-issue-key@v3
       with:
         string: ${{ env.POSSIBLE_ISSUE_REFERENCE }}
+        from: 
 
     - name: Check if issue key exists
       if: steps.find-issue-key.outputs.issue != ''
@@ -75,6 +76,7 @@ runs:
       uses: atlassian/gajira-find-issue-key@v3
       with:
         string: ${{ env.POSSIBLE_ISSUE_REFERENCE }}
+        from: 
 
     - name: Check if issue key exists in alternative Jira
       if: env.ISSUE_KEY_FOUND == 0 && steps.find-issue-key-second.outputs.issue != ''
