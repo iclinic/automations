@@ -21,6 +21,9 @@ inputs:
   jira_alternative_api_token:
     required: false
     description: Create one at https://id.atlassian.com/manage-profile/security/api-tokens
+  possible_issue_reference:
+    description: Uma string que possivelmente contém o issue no Jira. Pode ser o nome da branch, o título do PR, etc. O padrão é o nome da branch.
+    default: ""
 
 runs:
   using: composite
@@ -28,7 +31,7 @@ runs:
     - name: Setup | Environment
       shell: bash
       run: |
-        echo "POSSIBLE_ISSUE_REFERENCE=" >> "$GITHUB_ENV"
+        echo "POSSIBLE_ISSUE_REFERENCE=${{ inputs.possible_issue_reference }}" >> "$GITHUB_ENV"
         echo "ISSUE_KEY_FOUND=0" >> "$GITHUB_ENV"
 
     - name: Get Possible Issue Reference - Default / Push Event
