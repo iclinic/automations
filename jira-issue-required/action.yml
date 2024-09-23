@@ -34,10 +34,15 @@ runs:
         echo "POSSIBLE_ISSUE_REFERENCE=${{ inputs.possible_issue_reference }}" >> "$GITHUB_ENV"
         echo "ISSUE_KEY_FOUND=0" >> "$GITHUB_ENV"
 
-    - name: Get Possible Issue Reference - Default / Push Event
-      if: env.POSSIBLE_ISSUE_REFERENCE == '' && github.event_name == 'push'
+    - name: Get Possible Issue Reference - Default / Push Event in PR
+      if: env.POSSIBLE_ISSUE_REFERENCE == '' && github.event_name == 'push' && github.event.pull_request != null
       shell: bash
       run: echo "POSSIBLE_ISSUE_REFERENCE=${{ github.ref_name }} ${{ github.event.pull_request.title }}" >> "$GITHUB_ENV"
+
+    - name: Get Possible Issue Reference - Default / Push Event without PR
+      if: env.POSSIBLE_ISSUE_REFERENCE == '' && github.event_name == 'push'
+      shell: bash
+      run: echo "POSSIBLE_ISSUE_REFERENCE=${{ github.ref_name }}" >> "$GITHUB_ENV"
     
     - name: Get Possible Issue Reference - Default / Pull Request Event
       if: env.POSSIBLE_ISSUE_REFERENCE == '' && startsWith(github.event_name, 'pull_request')
