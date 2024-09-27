@@ -10,7 +10,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Check Whether PR/commit is associated to a Jira issue
-        uses: ./jira-issue-required/action-v2.yml
+        uses: ./jira-issue-required-v2
         with:
           jira_base_url: ${{ secrets.JIRA_BASE_URL }}
           jira_user_email: ${{ secrets.JIRA_USER_EMAIL }}
