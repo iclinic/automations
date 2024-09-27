@@ -50,10 +50,10 @@ jobs:
           IFS=' ' read -r -a rmp_tasks <<< "${{ env.rmp_tasks }}"
           
           for rmp_task in "${rmp_tasks[@]}"; do
-            jira_task_url="${{ secrets.JIRA_BASE_URL_GLIC }}/rest/api/3/issue/${rmp_task}"
+            jira_task_url="${{ inputs.jira_base_url }}/rest/api/3/issue/${rmp_task}"
 
             # Fazendo a requisição para o Jira
-            jira_response=$(curl -s -u "${{ secrets.JIRA_EMAIL_GLIC }}:${{ secrets.JIRA_API_TOKEN_TOKEN }}" \
+            jira_response=$(curl -s -u "${{ inputs.jira_user_email }}:${{ inputs.jira_api_token }}" \
               -H "Content-Type: application/json" \
               "$jira_task_url")
 
