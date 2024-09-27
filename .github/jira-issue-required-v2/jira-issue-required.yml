@@ -1,0 +1,87 @@
+name: Check PR Description and Jira Task Status
+
+inputs:
+  jira_base_url:
+    required: true
+    description: https://<your_org>.atlassian.net
+  jira_user_email:
+    required: true
+    description: your_user@your_domain.com
+  jira_api_token:
+    required: true
+    description: Create one at https://id.atlassian.com/manage-profile/security/api-tokens
+  jira_alternative_base_url:
+    required: false
+    description: https://<your_org>.atlassian.net
+  jira_alternative_user_email:
+    required: false
+    description: your_user@your_domain.com
+  jira_alternative_api_token:
+    required: false
+    description: Create one at https://id.atlassian.com/manage-profile/security/api-tokens
+  possible_issue_reference:
+    description: Uma string que possivelmente contém o issue no Jira. Pode ser o nome da branch, o título do PR, etc. O padrão é o nome da branch.
+    default: ""
+
+
+runs:
+  using: composite
+  check-pr-description:
+    if: github.base_ref == 'staging' && github.head_ref == 'dev-teste'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Check PR description for RMP-0000 pattern
+        id: check_description
+        run: |
+          pr_description=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.number }} | jq -r '.body')
+
+          echo "Descrição do PR: $pr_description"
+
+          # Encontrar todas as ocorrências de RMP-0000
+          rmp_tasks=($(echo "$pr_description" | grep -o -E 'RMP-[0-9]{4}'))
+
+          if [ ${#rmp_tasks[@]} -gt 0 ]; then
+            echo "Tarefas encontradas: ${rmp_tasks[@]}"
+            echo "rmp_found=true" >> $GITHUB_ENV
+            echo "rmp_tasks=${rmp_tasks[*]}" >> $GITHUB_ENV
+          else
+            echo "Nenhum padrão RMP-0000 encontrado."
+            echo "rmp_found=false" >> $GITHUB_ENV
+          fi
+
+      - name: Fail if no RMP-0000 pattern is found
+        if: env.rmp_found == 'false'
+        run: |
+          echo "Erro: A descrição do PR não contém identificadores no formato RMP-0000."
+          exit 1
+
+      - name: Check Jira Task Status
+        if: env.rmp_found == 'true'
+        id: check_jira_task
+        run: |
+          IFS=' ' read -r -a rmp_tasks <<< "${{ env.rmp_tasks }}"
+          
+          for rmp_task in "${rmp_tasks[@]}"; do
+            jira_task_url="${{ inputs.jira_base_url }}/rest/api/3/issue/${rmp_task}"
+
+            # Fazendo a requisição para o Jira
+            jira_response=$(curl -s -u "${{ inputs.jira_user_email }}:${{ inputs.jira_api_token }}" \
+              -H "Content-Type: application/json" \
+              "$jira_task_url")
+
+            # Capturando o status da task no Jira
+            jira_status=$(echo "$jira_response" | jq -r '.fields.status.name')
+
+            echo "Status da Task $rmp_task no Jira: $jira_status"
+
+            if [[ "$jira_status" == "Ready for Deployment" ]]; then
+              echo "A tarefa $rmp_task está fechada."
+            else
+              echo "Erro: A tarefa $rmp_task não está fechada. Status atual: $jira_status"
+              exit 1
+            fi
+          done
