@@ -24,6 +24,9 @@ inputs:
   possible_issue_reference:
     description: Uma string que possivelmente contém o issue no Jira. Pode ser o nome da branch, o título do PR, etc. O padrão é o nome da branch.
     default: ""
+  jira_status_allowed_to_merge:
+    required: true
+    description: O status do Jira que permite o merge. Ex.: To Deployment
 
 runs:
   using: composite
