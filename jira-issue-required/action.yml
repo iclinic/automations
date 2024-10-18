@@ -58,13 +58,12 @@ runs:
         JIRA_USER_EMAIL: ${{ inputs.jira_user_email }}
         JIRA_API_TOKEN: ${{ inputs.jira_api_token }}
         JIRA_STATUS_ALLOWED_TO_MERGE: ${{ inputs.JIRA_STATUS_ALLOWED_TO_MERGE }}
-        JIRA_RESPONSE_STATUS: ''
       shell: bash
       run: |
         echo "Searching for Jira issue $POSSIBLE_ISSUE_REFERENCE at $JIRA_BASE_URL"
         JIRA_API_ISSUE_ENDPOINT="$JIRA_BASE_URL/rest/api/2/issue/$POSSIBLE_ISSUE_REFERENCE?fields=key,status"
         echo "Requesting issue at $JIRA_API_ISSUE_ENDPOINT"
-        JIRA_RESPONSE_STATUS=$(curl --request GET --url "$JIRA_API_ISSUE_ENDPOINT" --user "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" | jq .fields.status.name)
+        JIRA_RESPONSE_STATUS=$(curl --request GET --url "$JIRA_API_ISSUE_ENDPOINT" --user "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" | jq .fields.status.name) >> "$GITHUB_ENV"
         echo "Response Status [$JIRA_RESPONSE_STATUS]"
 
         if [ "$JIRA_RESPONSE_STATUS" != "null" ]; then
@@ -105,5 +104,5 @@ runs:
       if: env.ISSUE_KEY_FOUND == 1 && (${{ env.JIRA_RESPONSE_STATUS }} != ${{ env.JIRA_STATUS_ALLOWED_TO_MERGE }}')
       shell: bash
       run: |
-        echo "Issue status is not allowed to merge because ${JIRA_RESPONSE_STATUS} is not ${JIRA_STATUS_ALLOWED_TO_MERGE}!"
+        echo "Issue status is not allowed to merge because ${{ env.JIRA_RESPONSE_STATUS }} is not ${JIRA_STATUS_ALLOWED_TO_MERGE}!"
         exit 1
