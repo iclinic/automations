@@ -105,8 +105,12 @@ runs:
         exit 1
 
     - name: Fail if status is not allowed to deploy
-      if: env.ISSUE_KEY_FOUND == 1 && (${{ env.JIRA_RESPONSE_STATUS }} != ${{ env.JIRA_STATUS_ALLOWED_TO_MERGE }})
+      if: env.ISSUE_KEY_FOUND == 1
       shell: bash
       run: |
-        echo "Issue status is not allowed to merge because ${{ env.JIRA_RESPONSE_STATUS }} is not ${{ env.JIRA_STATUS_ALLOWED_TO_MERGE }}!"
-        exit 1
+        JIRA_RESPONSE_STATUS_STR="${{ env.JIRA_RESPONSE_STATUS }}"
+        JIRA_STATUS_ALLOWED_TO_MERGE_STR="${{ env.JIRA_STATUS_ALLOWED_TO_MERGE }}"
+        if [ "$JIRA_RESPONSE_STATUS_STR" != "$JIRA_STATUS_ALLOWED_TO_MERGE_STR" ]; then
+          echo "Issue status is not allowed to merge because $JIRA_RESPONSE_STATUS_STR is not $JIRA_STATUS_ALLOWED_TO_MERGE_STR!"
+          exit 1
+        fi
