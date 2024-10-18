@@ -66,6 +66,7 @@ runs:
         JIRA_RESPONSE_STATUS=$(curl --request GET --url "$JIRA_API_ISSUE_ENDPOINT" --user "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" | jq .fields.status.name) >> "$GITHUB_ENV"
         echo "Response Status [$JIRA_RESPONSE_STATUS]"
         echo "JIRA_RESPONSE_STATUS=$JIRA_RESPONSE_STATUS" >> "$GITHUB_ENV"
+        echo "JIRA_STATUS_ALLOWED_TO_MERGE=$JIRA_STATUS_ALLOWED_TO_MERGE" >> "$GITHUB_ENV"
 
         if [ "$JIRA_RESPONSE_STATUS" != "null" ]; then
           echo "ISSUE_KEY_FOUND=1" >> "$GITHUB_ENV"
@@ -105,5 +106,5 @@ runs:
       if: env.ISSUE_KEY_FOUND == 1 && (${{ env.JIRA_RESPONSE_STATUS }} != ${{ env.JIRA_STATUS_ALLOWED_TO_MERGE }}')
       shell: bash
       run: |
-        echo "Issue status is not allowed to merge because ${{ env.JIRA_RESPONSE_STATUS }} is not ${JIRA_STATUS_ALLOWED_TO_MERGE}!"
+        echo "Issue status is not allowed to merge because ${{ env.JIRA_RESPONSE_STATUS }} is not ${env.JIRA_STATUS_ALLOWED_TO_MERGE}!"
         exit 1
