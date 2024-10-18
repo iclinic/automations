@@ -108,9 +108,10 @@ runs:
       if: env.ISSUE_KEY_FOUND == 1
       shell: bash
       run: |
-        JIRA_RESPONSE_STATUS_STR="${{ env.JIRA_RESPONSE_STATUS }}"
         JIRA_STATUS_ALLOWED_TO_MERGE_STR="${{ env.JIRA_STATUS_ALLOWED_TO_MERGE }}"
-        if [ "$JIRA_RESPONSE_STATUS_STR" != "$JIRA_STATUS_ALLOWED_TO_MERGE_STR" ]; then
+        echo "[${{ env.JIRA_RESPONSE_STATUS }}]"
+        echo "[${{ env.JIRA_STATUS_ALLOWED_TO_MERGE }}]"
+        if [ ${{ env.JIRA_RESPONSE_STATUS }} != "$JIRA_STATUS_ALLOWED_TO_MERGE_STR" ]; then
           echo "Issue status is not allowed to merge because $JIRA_RESPONSE_STATUS_STR is not $JIRA_STATUS_ALLOWED_TO_MERGE_STR!"
           exit 1
         fi
