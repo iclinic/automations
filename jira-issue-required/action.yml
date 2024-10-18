@@ -65,6 +65,7 @@ runs:
         echo "Requesting issue at $JIRA_API_ISSUE_ENDPOINT"
         JIRA_RESPONSE_STATUS=$(curl --request GET --url "$JIRA_API_ISSUE_ENDPOINT" --user "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" | jq .fields.status.name) >> "$GITHUB_ENV"
         echo "Response Status [$JIRA_RESPONSE_STATUS]"
+        echo "JIRA_RESPONSE_STATUS=$JIRA_RESPONSE_STATUS" >> "$GITHUB_ENV"
 
         if [ "$JIRA_RESPONSE_STATUS" != "null" ]; then
           echo "ISSUE_KEY_FOUND=1" >> "$GITHUB_ENV"
