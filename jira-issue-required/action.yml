@@ -106,5 +106,5 @@ runs:
       if: env.ISSUE_KEY_FOUND == 1 && (${{ env.JIRA_RESPONSE_STATUS }} != ${{ env.JIRA_STATUS_ALLOWED_TO_MERGE }}')
       shell: bash
       run: |
-        echo "Issue status is not allowed to merge because ${{ env.JIRA_RESPONSE_STATUS }} is not ${env.JIRA_STATUS_ALLOWED_TO_MERGE}!"
+        echo "Issue status is not allowed to merge because ${{ env.JIRA_RESPONSE_STATUS }} is not ${{ env.JIRA_STATUS_ALLOWED_TO_MERGE }}!"
         exit 1
