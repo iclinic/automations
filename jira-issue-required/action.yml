@@ -50,7 +50,10 @@ runs:
     - name: Get Possible Issue Reference - Default / Pull Request Event
       if: env.POSSIBLE_ISSUE_REFERENCE == '' && startsWith(github.event_name, 'pull_request')
       shell: bash
-      run: echo "POSSIBLE_ISSUE_REFERENCE=${{ github.head_ref }} ${{ github.event.pull_request.title }}" >> "$GITHUB_ENV"
+      run: |
+        echo "POSSIBLE_ISSUE_REFERENCE=${{ github.head_ref }} ${{ github.event.pull_request.title }}"
+        POSSIBLE_ISSUE_REFERENCE=$(echo "$POSSIBLE_ISSUE_REFERENCE" | grep -oE '[A-Z0-9]{1,10}-[0-9]+')
+        echo "POSSIBLE_ISSUE_REFERENCE=$POSSIBLE_ISSUE_REFERENCE" >> "$GITHUB_ENV"
 
     - name: Check if issue key exists
       env:
