@@ -65,6 +65,7 @@ runs:
         echo "Requesting issue at $JIRA_API_ISSUE_ENDPOINT"
         JIRA_RESPONSE_STATUS=$(curl --request GET --url "$JIRA_API_ISSUE_ENDPOINT" --user "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" | jq .fields.status.name) >> "$GITHUB_ENV"
         echo "Response Status [$JIRA_RESPONSE_STATUS]"
+        echo "JIRA_STATUS_ALLOWED_TO_MERGE -> [$JIRA_STATUS_ALLOWED_TO_MERGE]"
         echo "JIRA_RESPONSE_STATUS=$JIRA_RESPONSE_STATUS" >> "$GITHUB_ENV"
         echo "JIRA_STATUS_ALLOWED_TO_MERGE=$JIRA_STATUS_ALLOWED_TO_MERGE" >> "$GITHUB_ENV"
 
@@ -101,8 +102,6 @@ runs:
         exit 1
 
     - name: Fail if status is not allowed to deploy
-      env:
-        JIRA_STATUS_ALLOWED_TO_MERGE: ${{ inputs.JIRA_STATUS_ALLOWED_TO_MERGE }}
       if: env.ISSUE_KEY_FOUND == 1 && (${{ env.JIRA_RESPONSE_STATUS }} != ${{ env.JIRA_STATUS_ALLOWED_TO_MERGE }}')
       shell: bash
       run: |
