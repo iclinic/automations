@@ -75,6 +75,7 @@ runs:
         JIRA_USER_EMAIL: ${{ inputs.jira_alternative_user_email }}
         JIRA_API_TOKEN: ${{ inputs.jira_alternative_api_token }}
         JIRA_STATUS_ALLOWED_TO_MERGE: ${{ inputs.JIRA_STATUS_ALLOWED_TO_MERGE }}
+      shell: bash
       run: |
         echo "Searching for Jira issue $POSSIBLE_ISSUE_REFERENCE at $JIRA_BASE_URL"
         JIRA_API_ISSUE_ENDPOINT="$JIRA_BASE_URL/rest/api/2/issue/$POSSIBLE_ISSUE_REFERENCE?fields=key,status"
