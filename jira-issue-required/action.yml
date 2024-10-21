@@ -114,6 +114,6 @@ runs:
       run: |
         JIRA_STATUS_ALLOWED_TO_MERGE_STR="${{ env.JIRA_STATUS_ALLOWED_TO_MERGE }}"
         if [ ${{ env.JIRA_RESPONSE_STATUS }} != "$JIRA_STATUS_ALLOWED_TO_MERGE_STR" ]; then
-          echo "Issue status is not allowed to merge because $JIRA_RESPONSE_STATUS_STR is not $JIRA_STATUS_ALLOWED_TO_MERGE_STR!"
+          echo "Issue status is not allowed to merge because ${{ env.JIRA_RESPONSE_STATUS }} is not $JIRA_STATUS_ALLOWED_TO_MERGE_STR!"
           exit 1
         fi
