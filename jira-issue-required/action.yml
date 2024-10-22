@@ -72,7 +72,7 @@ runs:
 
         echo "DEFAULT_HOTFIX_PREFIX [$DEFAULT_HOTFIX_PREFIX]"
         HOTFIX_PREFIX=$(cut -c 1-${#DEFAULT_HOTFIX_PREFIX} <<< "${{ github.head_ref }}")
-        echo "Branch name ${{ github.head_ref }}"
+        echo "Branch name ${{ github.ref_name }}"
         echo "HOTFIX_PREFIX [$HOTFIX_PREFIX]"
 
 
