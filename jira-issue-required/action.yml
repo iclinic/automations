@@ -27,6 +27,9 @@ inputs:
   jira_status_allowed_to_merge:
     required: true
     description: O status do Jira que permite o merge -> To Deployment
+  default_hotfix_prefix:
+    required: false
+    description: Prefixo da branch de hotfix. DEfault -> hotfix/
 
 runs:
   using: composite
