@@ -58,6 +58,7 @@ runs:
         JIRA_USER_EMAIL: ${{ inputs.jira_user_email }}
         JIRA_API_TOKEN: ${{ inputs.jira_api_token }}
         JIRA_STATUS_ALLOWED_TO_MERGE: ${{ inputs.JIRA_STATUS_ALLOWED_TO_MERGE }}
+        DEFAULT_HOTFIX_PREFIX: ${{ inputs.default_hotfix_prefix }}
       shell: bash
       run: |
         ISSUE_KEY=$(echo "$POSSIBLE_ISSUE_REFERENCE" | grep -oE '[A-Z0-9]{1,10}-[0-9]+')
@@ -65,6 +66,15 @@ runs:
         echo "Searching for Jira issue $ISSUE_KEY at $JIRA_BASE_URL"
         JIRA_API_ISSUE_ENDPOINT="$JIRA_BASE_URL/rest/api/2/issue/$ISSUE_KEY?fields=key,status"
         echo "Requesting issue at $JIRA_API_ISSUE_ENDPOINT"
+
+        HOTFIX_PREFIX=$(cut -c 1-${DEFAULT_HOTFIX_PREFIX} <<< ${{ github.head_ref }})
+        echo "HOTFIX_PREFIX=$HOTFIX_PREFIX" >> "$GITHUB_ENV"
+        echo "HOTFIX_PREFIX [$HOTFIX_PREFIX]"
+        if [ "$HOTFIX_PREFIX" == "$DEFAULT_HOTFIX_PREFIX" ] ; then
+          echo "Hotfix prefix found! Enabling merge without Jira issue."
+          exit 0
+        fi
+
         JIRA_RESPONSE_STATUS=$(curl --request GET --url "$JIRA_API_ISSUE_ENDPOINT" --user "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" | jq .fields.status.name) >> "$GITHUB_ENV"
         echo "Response Status [$JIRA_RESPONSE_STATUS]"
         echo "JIRA_STATUS_ALLOWED_TO_MERGE -> [$JIRA_STATUS_ALLOWED_TO_MERGE]"
