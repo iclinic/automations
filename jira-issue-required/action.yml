@@ -75,6 +75,10 @@ runs:
         HOTFIX_PREFIX=$(cut -c 1-${#DEFAULT_HOTFIX_PREFIX} <<< "${{ github.ref_name }}")
         echo "HOTFIX_PREFIX [$HOTFIX_PREFIX]"
 
+        if [ "$HOTFIX_PREFIX" == "$DEFAULT_HOTFIX_PREFIX" ]; then
+          echo "Hotfix branch detected, skipping Jira issue status check."
+          exit 0
+        fi
 
         JIRA_RESPONSE_STATUS=$(curl --request GET --url "$JIRA_API_ISSUE_ENDPOINT" --user "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" | jq .fields.status.name) >> "$GITHUB_ENV"
         echo "Response Status [$JIRA_RESPONSE_STATUS]"
