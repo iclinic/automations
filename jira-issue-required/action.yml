@@ -98,6 +98,7 @@ runs:
         JIRA_USER_EMAIL: ${{ inputs.jira_alternative_user_email }}
         JIRA_API_TOKEN: ${{ inputs.jira_alternative_api_token }}
         JIRA_STATUS_ALLOWED_TO_MERGE: ${{ inputs.JIRA_STATUS_ALLOWED_TO_MERGE }}
+        DEFAULT_HOTFIX_PREFIX: ${{ inputs.default_hotfix_prefix }}
       shell: bash
       run: |
         ISSUE_KEY=$(echo "$POSSIBLE_ISSUE_REFERENCE" | grep -oE '[A-Z0-9]{1,10}-[0-9]+')
