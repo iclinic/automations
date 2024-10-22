@@ -71,7 +71,7 @@ runs:
         echo "Requesting issue at $JIRA_API_ISSUE_ENDPOINT"
 
         echo "DEFAULT_HOTFIX_PREFIX [$DEFAULT_HOTFIX_PREFIX]"
-        HOTFIX_PREFIX=$(cut -c 1-${#DEFAULT_HOTFIX_PREFIX} <<< ${{ github.head_ref }})
+        HOTFIX_PREFIX=$(cut -c 1-${#DEFAULT_HOTFIX_PREFIX} <<< "${{ github.head_ref }}")
         echo "HOTFIX_PREFIX [$HOTFIX_PREFIX]"
 
 
