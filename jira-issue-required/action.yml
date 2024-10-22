@@ -39,6 +39,7 @@ runs:
       run: |
         echo "POSSIBLE_ISSUE_REFERENCE=${{ inputs.possible_issue_reference }}" >> "$GITHUB_ENV"
         echo "ISSUE_KEY_FOUND=0" >> "$GITHUB_ENV"
+        echo "HOTFIX_PREFIX_FOUND=0" >> "$GITHUB_ENV"
 
     - name: Get Possible Issue Reference - Default / Push Event in PR
       if: env.POSSIBLE_ISSUE_REFERENCE == '' && github.event_name == 'push' && github.event.pull_request != null
@@ -76,6 +77,7 @@ runs:
         echo "HOTFIX_PREFIX [$HOTFIX_PREFIX]"
 
         if [ "$HOTFIX_PREFIX" == "$DEFAULT_HOTFIX_PREFIX" ]; then
+          echo "HOTFIX_PREFIX_FOUND=1" >> "$GITHUB_ENV"
           echo "Hotfix branch detected, skipping Jira issue status check."
           exit 0
         fi
@@ -114,6 +116,7 @@ runs:
         echo "HOTFIX_PREFIX [$HOTFIX_PREFIX]"
 
         if [ "$HOTFIX_PREFIX" == "$DEFAULT_HOTFIX_PREFIX" ]; then
+          echo "HOTFIX_PREFIX_FOUND=1" >> "$GITHUB_ENV"
           echo "Hotfix branch detected, skipping Jira issue status check."
           exit 0
         fi
@@ -130,14 +133,14 @@ runs:
         fi
 
     - name: Fail if not found
-      if: env.ISSUE_KEY_FOUND == 0
+      if: env.ISSUE_KEY_FOUND == 0 && env.HOTFIX_PREFIX_FOUND == 0
       shell: bash
       run: |
         echo "Issue not found in '${{ env.POSSIBLE_ISSUE_REFERENCE }}'!"
         exit 1
 
     - name: Fail if status is not allowed to deploy
-      if: env.ISSUE_KEY_FOUND == 1
+      if: env.ISSUE_KEY_FOUND == 1 && env.HOTFIX_PREFIX_FOUND == 0
       shell: bash
       run: |
         JIRA_STATUS_ALLOWED_TO_MERGE_STR="${{ env.JIRA_STATUS_ALLOWED_TO_MERGE }}"
