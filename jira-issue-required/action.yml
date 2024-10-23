@@ -29,7 +29,7 @@ inputs:
     description: O status do Jira que permite o merge -> To Deployment
   default_hotfix_prefix:
     required: false
-    description: Prefixo da branch de hotfix. DEfault -> hotfix/
+    description: Prefixo da branch de hotfix. Default -> hotfix/
 
 runs:
   using: composite
