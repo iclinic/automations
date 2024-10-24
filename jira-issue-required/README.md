@@ -50,4 +50,5 @@ jobs:
           jira_alternative_base_url: ${{ secrets.JIRA_ALTERNATIVE_BASE_URL }}
           jira_alternative_user_email: ${{ secrets.JIRA_ALTERNATIVE_USER_EMAIL }}
           jira_alternative_api_token: ${{ secrets.JIRA_ALTERNATIVE_API_TOKEN }}
+          default_hotfix_prefix: ${{ vars.DEFAULT_HOTFIX_PREFIX }}
 ```
