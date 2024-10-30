@@ -19,5 +19,4 @@ jobs:
           jira_alternative_user_email: ${{ secrets.JIRA_ALTERNATIVE_USER_EMAIL }}
           jira_alternative_api_token: ${{ secrets.JIRA_ALTERNATIVE_API_TOKEN }}
           jira_status_allowed_to_merge: ${{ vars.JIRA_STATUS_ALLOWED_TO_MERGE }}
-          possible_issue_reference: ${{ github.head_ref }}
           default_hotfix_prefix: ${{ vars.default_hotfix_prefix }}
