@@ -13,6 +13,8 @@ Essa action se integra ao Jira para garantir que a branch associada ao Pull Requ
 - JIRA_BASE_URL: Com o valor `https://<sua org>.atlassian.net`;
 - JIRA_USER_EMAIL: Um email de um user que acesso ao Jira para validar se o card exista;
 - JIRA_API_TOKEN: Token criado para este fim deve ser criado em [API Tokens](https://id.atlassian.com/manage-profile/security/api-tokens);
+- DEFAULT_HOTFIX_PREFIX: Prefixo padrão para branches de Hotfix isentas de seguir o fluxo completo em prol da resolução rápida em produção. Valor padrão: `hotfix/`
+- JIRA_STATUS_ALLOWED_TO_MERGE: Status do Jira que permitirá o merge. Valor padrão: `To Deployment`
 
 Opcional:
 - `possible_issue_reference`: Este parâmetro pode ser usado para sobrescrever a string sob a qual a action procurará a *issue reference*. Por padrão, é o nome da branch.
@@ -46,9 +48,11 @@ jobs:
           jira_base_url: ${{ secrets.JIRA_BASE_URL }}
           jira_user_email: ${{ secrets.JIRA_USER_EMAIL }}
           jira_api_token: ${{ secrets.JIRA_API_TOKEN }}
-          # configuração opcional:
           jira_alternative_base_url: ${{ secrets.JIRA_ALTERNATIVE_BASE_URL }}
           jira_alternative_user_email: ${{ secrets.JIRA_ALTERNATIVE_USER_EMAIL }}
           jira_alternative_api_token: ${{ secrets.JIRA_ALTERNATIVE_API_TOKEN }}
-          default_hotfix_prefix: ${{ vars.DEFAULT_HOTFIX_PREFIX }}
+          # configuração opcional:
+          jira_status_allowed_to_merge: ${{ vars.JIRA_STATUS_ALLOWED_TO_MERGE }}
+          possible_issue_reference: ${{ github.head_ref }}
+          default_hotfix_prefix: ${{ vars.default_hotfix_prefix }}
 ```
