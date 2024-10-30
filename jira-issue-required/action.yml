@@ -71,6 +71,9 @@ runs:
         JIRA_API_ISSUE_ENDPOINT="${JIRA_BASE_URL}/rest/api/2/issue/${ISSUE_KEY}?fields=key,status"
         echo "Requesting issue at $JIRA_API_ISSUE_ENDPOINT"
 
+        echo "Length of JIRA_BASE_URL: ${#JIRA_BASE_URL}"
+        echo "Length of JIRA_API_ISSUE_ENDPOINT: ${#JIRA_API_ISSUE_ENDPOINT}"
+
         echo "DEFAULT_HOTFIX_PREFIX [$DEFAULT_HOTFIX_PREFIX]"
         echo "Branch name ${{ github.head_ref }}"
         HOTFIX_PREFIX=$(cut -c 1-${#DEFAULT_HOTFIX_PREFIX} <<< "${{ github.head_ref }}")
@@ -110,13 +113,14 @@ runs:
         JIRA_API_ISSUE_ENDPOINT="${JIRA_BASE_URL}/rest/api/2/issue/$ISSUE_KEY?fields=key,status"
         echo "Requesting issue at $JIRA_API_ISSUE_ENDPOINT"
 
+        echo "Length of JIRA_BASE_URL: ${#JIRA_BASE_URL}"
+        echo "Length of JIRA_API_ISSUE_ENDPOINT: ${#JIRA_API_ISSUE_ENDPOINT}"
+
         echo "DEFAULT_HOTFIX_PREFIX [$DEFAULT_HOTFIX_PREFIX]"
         echo "Branch name ${{ github.head_ref }}"
         HOTFIX_PREFIX=$(cut -c 1-${#DEFAULT_HOTFIX_PREFIX} <<< "${{ github.head_ref }}")
         echo "HOTFIX_PREFIX [$HOTFIX_PREFIX]"
 
-        echo "Length of JIRA_BASE_URL: ${#JIRA_BASE_URL}"
-        echo "Length of JIRA_API_ISSUE_ENDPOINT: ${#JIRA_API_ISSUE_ENDPOINT}"
 
         if [ "$HOTFIX_PREFIX" == "$DEFAULT_HOTFIX_PREFIX" ]; then
           echo "HOTFIX_PREFIX_FOUND=1" >> "$GITHUB_ENV"
