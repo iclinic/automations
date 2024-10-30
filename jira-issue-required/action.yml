@@ -68,11 +68,8 @@ runs:
         ISSUE_KEY=$(echo "$POSSIBLE_ISSUE_REFERENCE" | grep -oE '[A-Z0-9]{1,10}-[0-9]+')
         echo "ISSUE_KEY=$ISSUE_KEY" >> "$GITHUB_ENV"
         echo "Searching for Jira issue $ISSUE_KEY at $JIRA_BASE_URL"
-        JIRA_API_ISSUE_ENDPOINT="${JIRA_BASE_URL}/rest/api/2/issue/${ISSUE_KEY}?fields=key,status"
+        JIRA_API_ISSUE_ENDPOINT="$JIRA_BASE_URL/rest/api/2/issue/$ISSUE_KEY?fields=key,status"
         echo "Requesting issue at $JIRA_API_ISSUE_ENDPOINT"
-
-        echo "Length of JIRA_BASE_URL: ${#JIRA_BASE_URL}"
-        echo "Length of JIRA_API_ISSUE_ENDPOINT: ${#JIRA_API_ISSUE_ENDPOINT}"
 
         echo "DEFAULT_HOTFIX_PREFIX [$DEFAULT_HOTFIX_PREFIX]"
         echo "Branch name ${{ github.head_ref }}"
@@ -85,7 +82,7 @@ runs:
           exit 0
         fi
 
-        JIRA_RESPONSE_STATUS=$(curl --request GET --url "${JIRA_API_ISSUE_ENDPOINT}" --user "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" | jq .fields.status.name)
+        JIRA_RESPONSE_STATUS=$(curl --request GET --url "$JIRA_API_ISSUE_ENDPOINT" --user "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" | jq .fields.status.name) >> "$GITHUB_ENV"
         echo "Response Status [$JIRA_RESPONSE_STATUS]"
         echo "JIRA_STATUS_ALLOWED_TO_MERGE -> [$JIRA_STATUS_ALLOWED_TO_MERGE]"
         echo "JIRA_RESPONSE_STATUS=$JIRA_RESPONSE_STATUS" >> "$GITHUB_ENV"
@@ -110,17 +107,13 @@ runs:
         echo "ISSUE_KEY=$ISSUE_KEY" >> "$GITHUB_ENV"
         echo "Alternative Jira check"
         echo "Searching for Jira issue $ISSUE_KEY at $JIRA_BASE_URL"
-        JIRA_API_ISSUE_ENDPOINT="${JIRA_BASE_URL}/rest/api/2/issue/$ISSUE_KEY?fields=key,status"
+        JIRA_API_ISSUE_ENDPOINT="$JIRA_BASE_URL/rest/api/2/issue/$ISSUE_KEY?fields=key,status"
         echo "Requesting issue at $JIRA_API_ISSUE_ENDPOINT"
-
-        echo "Length of JIRA_BASE_URL: ${#JIRA_BASE_URL}"
-        echo "Length of JIRA_API_ISSUE_ENDPOINT: ${#JIRA_API_ISSUE_ENDPOINT}"
 
         echo "DEFAULT_HOTFIX_PREFIX [$DEFAULT_HOTFIX_PREFIX]"
         echo "Branch name ${{ github.head_ref }}"
         HOTFIX_PREFIX=$(cut -c 1-${#DEFAULT_HOTFIX_PREFIX} <<< "${{ github.head_ref }}")
         echo "HOTFIX_PREFIX [$HOTFIX_PREFIX]"
-
 
         if [ "$HOTFIX_PREFIX" == "$DEFAULT_HOTFIX_PREFIX" ]; then
           echo "HOTFIX_PREFIX_FOUND=1" >> "$GITHUB_ENV"
@@ -128,10 +121,7 @@ runs:
           exit 0
         fi
 
-        echo "Length of JIRA_BASE_URL: ${#JIRA_BASE_URL}"
-        echo "Length of JIRA_API_ISSUE_ENDPOINT: ${#JIRA_API_ISSUE_ENDPOINT}"
-
-        JIRA_RESPONSE_STATUS=$(curl --request GET --url "${JIRA_API_ISSUE_ENDPOINT}" --user "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" | jq .fields.status.name)
+        JIRA_RESPONSE_STATUS=$(curl --request GET --url "$JIRA_API_ISSUE_ENDPOINT" --user "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" | jq .fields.status.name) >> "$GITHUB_ENV"
         echo "Response Status [$JIRA_RESPONSE_STATUS]"
         echo "JIRA_STATUS_ALLOWED_TO_MERGE -> [$JIRA_STATUS_ALLOWED_TO_MERGE]"
         echo "JIRA_RESPONSE_STATUS=$JIRA_RESPONSE_STATUS" >> "$GITHUB_ENV"
