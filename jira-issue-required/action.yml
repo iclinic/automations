@@ -115,6 +115,9 @@ runs:
         HOTFIX_PREFIX=$(cut -c 1-${#DEFAULT_HOTFIX_PREFIX} <<< "${{ github.head_ref }}")
         echo "HOTFIX_PREFIX [$HOTFIX_PREFIX]"
 
+        echo "Length of JIRA_BASE_URL: ${#JIRA_BASE_URL}"
+        echo "Length of JIRA_API_ISSUE_ENDPOINT: ${#JIRA_API_ISSUE_ENDPOINT}"
+
         if [ "$HOTFIX_PREFIX" == "$DEFAULT_HOTFIX_PREFIX" ]; then
           echo "HOTFIX_PREFIX_FOUND=1" >> "$GITHUB_ENV"
           echo "Hotfix branch detected, skipping Jira issue status check."
