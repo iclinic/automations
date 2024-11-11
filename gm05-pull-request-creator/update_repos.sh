@@ -15,7 +15,10 @@ reset(){
     for repo in "${repos[@]}"; do
         repo_name=$(basename "$repo" .git)
         echo "Removing directory $repo_name"
-        rm -rf "$repo_name"
+        if [ -d "$repo_name" ]; then
+            echo "Removing directory $repo_name"
+            rm -rf "$repo_name"
+        fi
     done
 }
 
