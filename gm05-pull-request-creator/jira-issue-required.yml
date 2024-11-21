@@ -1,0 +1,26 @@
+on:
+  pull_request:
+    types:
+      - opened
+
+  push:
+    branches:
+      - '**'
+      - '!MAIN_BRANCH'
+      - '!staging'
+
+jobs:
+  jira_issue_required:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Whether PR/commit is associated to a Jira issue
+        uses: iclinic/automations/jira-issue-required@v2
+        with:
+          jira_base_url: ${{ secrets.JIRA_BASE_URL }}
+          jira_user_email: ${{ secrets.JIRA_USER_EMAIL }}
+          jira_api_token: ${{ secrets.JIRA_API_TOKEN }}
+          jira_alternative_base_url: ${{ secrets.JIRA_ALTERNATIVE_BASE_URL }}
+          jira_alternative_user_email: ${{ secrets.JIRA_ALTERNATIVE_USER_EMAIL }}
+          jira_alternative_api_token: ${{ secrets.JIRA_ALTERNATIVE_API_TOKEN }}
+          jira_status_allowed_to_merge: ${{ vars.JIRA_STATUS_ALLOWED_TO_MERGE }}
+          default_hotfix_prefix: ${{ vars.default_hotfix_prefix }}
