@@ -117,13 +117,13 @@ runs:
         echo "DEFAULT_HOTFIX_PREFIX [$DEFAULT_HOTFIX_PREFIX]"
         echo "Branch name ${{ github.head_ref }}"
 
-        IFS=',' read -r -a BRANCH_PREFIXES_TO_IGNORE <<< "${{ env.BRANCH_PREFIXES_TO_IGNORE }}"
-        for PREFIX in "${BRANCH_PREFIXES_TO_IGNORE[@]}"; do
-          BRANCH_PREFIX=$(cut -c 1-${#PREFIX} <<< "${{ github.head_ref }}")
-          echo "BRANCH_PREFIX [$BRANCH_PREFIX]"
-          if [[ "$BRANCH_PREFIX" == "$PREFIX" ]]; then
-            echo "PREFIX_TO_IGNORE_FOUND=1" >> "$GITHUB_ENV"
-            echo "Branch prefix to ignore detected, skipping Jira issue status check."
+        IFS=',' read -ra PREFIXES <<< "$DEFAULT_HOTFIX_PREFIX"
+        for PREFIX in "${PREFIXES[@]}"; do
+          HOTFIX_PREFIX=$(cut -c 1-${#PREFIX} <<< "${{ github.head_ref }}")
+          echo "Checking prefix [$PREFIX] against branch name"
+          if [ "$HOTFIX_PREFIX" == "$PREFIX" ]; then
+            echo "HOTFIX_PREFIX_FOUND=1" >> "$GITHUB_ENV"
+            echo "Hotfix branch detected, skipping Jira issue status check."
             exit 0
           fi
         done
