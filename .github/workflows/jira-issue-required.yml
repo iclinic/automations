@@ -20,3 +20,4 @@ jobs:
           jira_alternative_api_token: ${{ secrets.JIRA_ALTERNATIVE_API_TOKEN }}
           jira_status_allowed_to_merge: ${{ vars.JIRA_STATUS_ALLOWED_TO_MERGE }}
           default_hotfix_prefix: ${{ vars.default_hotfix_prefix }}
+          default_revert_prefix: ${{ vars.default_revert_prefix }}

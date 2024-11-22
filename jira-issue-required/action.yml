@@ -30,6 +30,9 @@ inputs:
   default_hotfix_prefix:
     required: false
     description: Prefixo da branch de hotfix. Default -> hotfix/
+  default_revert_prefix:
+    required: false
+    description: Prefixo da branch de revert. Default -> revert/
 
 runs:
   using: composite
@@ -39,7 +42,7 @@ runs:
       run: |
         echo "POSSIBLE_ISSUE_REFERENCE=${{ inputs.possible_issue_reference }}" >> "$GITHUB_ENV"
         echo "ISSUE_KEY_FOUND=0" >> "$GITHUB_ENV"
-        echo "HOTFIX_PREFIX_FOUND=0" >> "$GITHUB_ENV"
+        echo "PREFIX_TO_IGNORE_FOUND=0" >> "$GITHUB_ENV"
 
     - name: Get Possible Issue Reference - Default / Push Event in PR
       if: env.POSSIBLE_ISSUE_REFERENCE == '' && github.event_name == 'push' && github.event.pull_request != null
@@ -63,25 +66,31 @@ runs:
         JIRA_API_TOKEN: ${{ inputs.jira_api_token }}
         JIRA_STATUS_ALLOWED_TO_MERGE: ${{ inputs.JIRA_STATUS_ALLOWED_TO_MERGE }}
         DEFAULT_HOTFIX_PREFIX: ${{ inputs.default_hotfix_prefix }}
+        DEFAULT_REVERT_PREFIX: ${{ inputs.default_revert_prefix }}
       shell: bash
       run: |
         ISSUE_KEY=$(echo "$POSSIBLE_ISSUE_REFERENCE" | grep -oE '[a-zA-Z0-9]{1,10}-[0-9]+' | head -n 1)
         echo "ISSUE_KEY=$ISSUE_KEY" >> "$GITHUB_ENV"
-        echo "Searching for Jira issue $ISSUE_KEY at $JIRA_BASE_URL"
-        JIRA_API_ISSUE_ENDPOINT="$JIRA_BASE_URL/rest/api/2/issue/$ISSUE_KEY?fields=key,status"
-        echo "Requesting issue at $JIRA_API_ISSUE_ENDPOINT"
 
         echo "DEFAULT_HOTFIX_PREFIX [$DEFAULT_HOTFIX_PREFIX]"
+        echo "DEFAULT_REVERT_PREFIX [$DEFAULT_REVERT_PREFIX]"
         echo "Branch name ${{ github.head_ref }}"
-        HOTFIX_PREFIX=$(cut -c 1-${#DEFAULT_HOTFIX_PREFIX} <<< "${{ github.head_ref }}")
-        echo "HOTFIX_PREFIX [$HOTFIX_PREFIX]"
 
-        if [ "$HOTFIX_PREFIX" == "$DEFAULT_HOTFIX_PREFIX" ]; then
-          echo "HOTFIX_PREFIX_FOUND=1" >> "$GITHUB_ENV"
+        if [[ "${{ github.head_ref }}" == "${{ env.DEFAULT_HOTFIX_PREFIX }}"* ]]; then
+          echo "PREFIX_TO_IGNORE_FOUND=1" >> "$GITHUB_ENV"
           echo "Hotfix branch detected, skipping Jira issue status check."
           exit 0
         fi
 
+        if [[ "${{ github.head_ref }}" == "${{ env.DEFAULT_REVERT_PREFIX }}"* ]]; then
+          echo "PREFIX_TO_IGNORE_FOUND=1" >> "$GITHUB_ENV"
+          echo "Revert branch detected, skipping Jira issue status check."
+          exit 0
+        fi
+
+        echo "Searching for Jira issue $ISSUE_KEY at $JIRA_BASE_URL"
+        JIRA_API_ISSUE_ENDPOINT="$JIRA_BASE_URL/rest/api/2/issue/$ISSUE_KEY?fields=key,status"
+        echo "Requesting issue at $JIRA_API_ISSUE_ENDPOINT"
         JIRA_RESPONSE_STATUS=$(curl --request GET --url "$JIRA_API_ISSUE_ENDPOINT" --user "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" | jq .fields.status.name) >> "$GITHUB_ENV"
         echo "Response Status [$JIRA_RESPONSE_STATUS]"
         echo "JIRA_STATUS_ALLOWED_TO_MERGE -> [$JIRA_STATUS_ALLOWED_TO_MERGE]"
@@ -94,33 +103,39 @@ runs:
         fi
 
     - name: Check if issue key exists in alternative Jira
-      if: env.ISSUE_KEY_FOUND == 0 && inputs.jira_alternative_base_url != '' && inputs.jira_alternative_user_email != '' && inputs.jira_alternative_api_token != ''
+      if: env.ISSUE_KEY_FOUND == 0 && env.PREFIX_TO_IGNORE_FOUND==0 && inputs.jira_alternative_base_url != '' && inputs.jira_alternative_user_email != '' && inputs.jira_alternative_api_token != ''
       env:
         JIRA_BASE_URL: ${{ inputs.jira_alternative_base_url }}
         JIRA_USER_EMAIL: ${{ inputs.jira_alternative_user_email }}
         JIRA_API_TOKEN: ${{ inputs.jira_alternative_api_token }}
         JIRA_STATUS_ALLOWED_TO_MERGE: ${{ inputs.JIRA_STATUS_ALLOWED_TO_MERGE }}
         DEFAULT_HOTFIX_PREFIX: ${{ inputs.default_hotfix_prefix }}
+        DEFAULT_REVERT_PREFIX: ${{ inputs.default_revert_prefix }}
       shell: bash
       run: |
         ISSUE_KEY=$(echo "$POSSIBLE_ISSUE_REFERENCE" | grep -oE '[a-zA-Z0-9]{1,10}-[0-9]+' | head -n 1)
         echo "ISSUE_KEY=$ISSUE_KEY" >> "$GITHUB_ENV"
         echo "Alternative Jira check"
-        echo "Searching for Jira issue $ISSUE_KEY at $JIRA_BASE_URL"
-        JIRA_API_ISSUE_ENDPOINT="$JIRA_BASE_URL/rest/api/2/issue/$ISSUE_KEY?fields=key,status"
-        echo "Requesting issue at $JIRA_API_ISSUE_ENDPOINT"
 
         echo "DEFAULT_HOTFIX_PREFIX [$DEFAULT_HOTFIX_PREFIX]"
+        echo "DEFAULT_REVERT_PREFIX [$DEFAULT_REVERT_PREFIX]"
         echo "Branch name ${{ github.head_ref }}"
-        HOTFIX_PREFIX=$(cut -c 1-${#DEFAULT_HOTFIX_PREFIX} <<< "${{ github.head_ref }}")
-        echo "HOTFIX_PREFIX [$HOTFIX_PREFIX]"
 
-        if [ "$HOTFIX_PREFIX" == "$DEFAULT_HOTFIX_PREFIX" ]; then
-          echo "HOTFIX_PREFIX_FOUND=1" >> "$GITHUB_ENV"
+        if [[ "${{ github.head_ref }}" == "${{ env.DEFAULT_HOTFIX_PREFIX }}"* ]]; then
+          echo "PREFIX_TO_IGNORE_FOUND=1" >> "$GITHUB_ENV"
           echo "Hotfix branch detected, skipping Jira issue status check."
           exit 0
         fi
 
+        if [[ "${{ github.head_ref }}" == "${{ env.DEFAULT_REVERT_PREFIX }}"* ]]; then
+          echo "PREFIX_TO_IGNORE_FOUND=1" >> "$GITHUB_ENV"
+          echo "Revert branch detected, skipping Jira issue status check."
+          exit 0
+        fi
+
+        echo "Searching for Jira issue $ISSUE_KEY at $JIRA_BASE_URL"
+        JIRA_API_ISSUE_ENDPOINT="$JIRA_BASE_URL/rest/api/2/issue/$ISSUE_KEY?fields=key,status"
+        echo "Requesting issue at $JIRA_API_ISSUE_ENDPOINT"
         JIRA_RESPONSE_STATUS=$(curl --request GET --url "$JIRA_API_ISSUE_ENDPOINT" --user "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" | jq .fields.status.name) >> "$GITHUB_ENV"
         echo "Response Status [$JIRA_RESPONSE_STATUS]"
         echo "JIRA_STATUS_ALLOWED_TO_MERGE -> [$JIRA_STATUS_ALLOWED_TO_MERGE]"
@@ -133,14 +148,14 @@ runs:
         fi
 
     - name: Fail if not found
-      if: env.ISSUE_KEY_FOUND == 0 && env.HOTFIX_PREFIX_FOUND == 0
+      if: env.ISSUE_KEY_FOUND == 0 && env.PREFIX_TO_IGNORE_FOUND == 0
       shell: bash
       run: |
         echo "Issue not found in '${{ env.POSSIBLE_ISSUE_REFERENCE }}'!"
         exit 1
 
     - name: Fail if status is not allowed to deploy
-      if: env.ISSUE_KEY_FOUND == 1 && env.HOTFIX_PREFIX_FOUND == 0
+      if: env.ISSUE_KEY_FOUND == 1 && env.PREFIX_TO_IGNORE_FOUND == 0
       shell: bash
       run: |
         JIRA_STATUS_ALLOWED_TO_MERGE_STR="${{ env.JIRA_STATUS_ALLOWED_TO_MERGE }}"
