@@ -30,6 +30,9 @@ inputs:
   default_hotfix_prefix:
     required: false
     description: Prefixo da branch de hotfix. Default -> hotfix/
+  default_revert_prefix:
+    required: false
+    description: Prefixo da branch de revert. Default -> revert/
 
 runs:
   using: composite
@@ -63,7 +66,7 @@ runs:
         JIRA_API_TOKEN: ${{ inputs.jira_api_token }}
         JIRA_STATUS_ALLOWED_TO_MERGE: ${{ inputs.JIRA_STATUS_ALLOWED_TO_MERGE }}
         DEFAULT_HOTFIX_PREFIX: ${{ inputs.default_hotfix_prefix }}
-        DEFAULT_REVERT_PREFIX: ${{ inputs.default_hotfix_prefix }}
+        DEFAULT_REVERT_PREFIX: ${{ inputs.default_revert_prefix }}
       shell: bash
       run: |
         ISSUE_KEY=$(echo "$POSSIBLE_ISSUE_REFERENCE" | grep -oE '[A-Z0-9]{1,10}-[0-9]+' | head -n 1)
@@ -73,18 +76,20 @@ runs:
         echo "Requesting issue at $JIRA_API_ISSUE_ENDPOINT"
 
         echo "DEFAULT_HOTFIX_PREFIX [$DEFAULT_HOTFIX_PREFIX]"
+        echo "DEFAULT_REVERT_PREFIX [$DEFAULT_REVERT_PREFIX]"
         echo "Branch name ${{ github.head_ref }}"
 
-        IFS=',' read -r -a BRANCH_PREFIXES_TO_IGNORE <<< "${{ env.BRANCH_PREFIXES_TO_IGNORE }}"
-        for PREFIX in "${BRANCH_PREFIXES_TO_IGNORE[@]}"; do
-          BRANCH_PREFIX=$(cut -c 1-${#PREFIX} <<< "${{ github.head_ref }}")
-          echo "BRANCH_PREFIX [$BRANCH_PREFIX]"
-          if [[ "$BRANCH_PREFIX" == "$PREFIX" ]]; then
-            echo "PREFIX_TO_IGNORE_FOUND=1" >> "$GITHUB_ENV"
-            echo "Branch prefix to ignore detected, skipping Jira issue status check."
-            exit 0
-          fi
-        done
+        if [[ "${{ github.head_ref }}" == "${{ env.DEFAULT_HOTFIX_PREFIX }}"* ]]; then
+          echo "PREFIX_TO_IGNORE_FOUND=1" >> "$GITHUB_ENV"
+          echo "Hotfix branch detected, skipping Jira issue status check."
+          exit 0
+        fi
+
+        if [[ "${{ github.head_ref }}" == "${{ env.DEFAULT_REVERT_PREFIX }}"* ]]; then
+          echo "PREFIX_TO_IGNORE_FOUND=1" >> "$GITHUB_ENV"
+          echo "Revert branch detected, skipping Jira issue status check."
+          exit 0
+        fi
 
         JIRA_RESPONSE_STATUS=$(curl --request GET --url "$JIRA_API_ISSUE_ENDPOINT" --user "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" | jq .fields.status.name) >> "$GITHUB_ENV"
         echo "Response Status [$JIRA_RESPONSE_STATUS]"
@@ -104,7 +109,8 @@ runs:
         JIRA_USER_EMAIL: ${{ inputs.jira_alternative_user_email }}
         JIRA_API_TOKEN: ${{ inputs.jira_alternative_api_token }}
         JIRA_STATUS_ALLOWED_TO_MERGE: ${{ inputs.JIRA_STATUS_ALLOWED_TO_MERGE }}
-        BRANCH_PREFIXES_TO_IGNORE: ${{ inputs.branch_prefixes_to_ignore }}
+        DEFAULT_HOTFIX_PREFIX: ${{ inputs.default_hotfix_prefix }}
+        DEFAULT_REVERT_PREFIX: ${{ inputs.default_revert_prefix }}
       shell: bash
       run: |
         ISSUE_KEY=$(echo "$POSSIBLE_ISSUE_REFERENCE" | grep -oE '[A-Z0-9]{1,10}-[0-9]+' | head -n 1)
@@ -115,18 +121,20 @@ runs:
         echo "Requesting issue at $JIRA_API_ISSUE_ENDPOINT"
 
         echo "DEFAULT_HOTFIX_PREFIX [$DEFAULT_HOTFIX_PREFIX]"
+        echo "DEFAULT_REVERT_PREFIX [$DEFAULT_REVERT_PREFIX]"
         echo "Branch name ${{ github.head_ref }}"
 
-        IFS=',' read -ra PREFIXES <<< "$DEFAULT_HOTFIX_PREFIX"
-        for PREFIX in "${PREFIXES[@]}"; do
-          HOTFIX_PREFIX=$(cut -c 1-${#PREFIX} <<< "${{ github.head_ref }}")
-          echo "Checking prefix [$PREFIX] against branch name"
-          if [ "$HOTFIX_PREFIX" == "$PREFIX" ]; then
-            echo "HOTFIX_PREFIX_FOUND=1" >> "$GITHUB_ENV"
-            echo "Hotfix branch detected, skipping Jira issue status check."
-            exit 0
-          fi
-        done
+        if [[ "${{ github.head_ref }}" == "${{ env.DEFAULT_HOTFIX_PREFIX }}"* ]]; then
+          echo "PREFIX_TO_IGNORE_FOUND=1" >> "$GITHUB_ENV"
+          echo "Hotfix branch detected, skipping Jira issue status check."
+          exit 0
+        fi
+
+        if [[ "${{ github.head_ref }}" == "${{ env.DEFAULT_REVERT_PREFIX }}"* ]]; then
+          echo "PREFIX_TO_IGNORE_FOUND=1" >> "$GITHUB_ENV"
+          echo "Revert branch detected, skipping Jira issue status check."
+          exit 0
+        fi
 
         JIRA_RESPONSE_STATUS=$(curl --request GET --url "$JIRA_API_ISSUE_ENDPOINT" --user "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" | jq .fields.status.name) >> "$GITHUB_ENV"
         echo "Response Status [$JIRA_RESPONSE_STATUS]"
