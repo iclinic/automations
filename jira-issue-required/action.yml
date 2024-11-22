@@ -71,9 +71,6 @@ runs:
       run: |
         ISSUE_KEY=$(echo "$POSSIBLE_ISSUE_REFERENCE" | grep -oE '[A-Z0-9]{1,10}-[0-9]+' | head -n 1)
         echo "ISSUE_KEY=$ISSUE_KEY" >> "$GITHUB_ENV"
-        echo "Searching for Jira issue $ISSUE_KEY at $JIRA_BASE_URL"
-        JIRA_API_ISSUE_ENDPOINT="$JIRA_BASE_URL/rest/api/2/issue/$ISSUE_KEY?fields=key,status"
-        echo "Requesting issue at $JIRA_API_ISSUE_ENDPOINT"
 
         echo "DEFAULT_HOTFIX_PREFIX [$DEFAULT_HOTFIX_PREFIX]"
         echo "DEFAULT_REVERT_PREFIX [$DEFAULT_REVERT_PREFIX]"
@@ -91,6 +88,9 @@ runs:
           exit 0
         fi
 
+        echo "Searching for Jira issue $ISSUE_KEY at $JIRA_BASE_URL"
+        JIRA_API_ISSUE_ENDPOINT="$JIRA_BASE_URL/rest/api/2/issue/$ISSUE_KEY?fields=key,status"
+        echo "Requesting issue at $JIRA_API_ISSUE_ENDPOINT"
         JIRA_RESPONSE_STATUS=$(curl --request GET --url "$JIRA_API_ISSUE_ENDPOINT" --user "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" | jq .fields.status.name) >> "$GITHUB_ENV"
         echo "Response Status [$JIRA_RESPONSE_STATUS]"
         echo "JIRA_STATUS_ALLOWED_TO_MERGE -> [$JIRA_STATUS_ALLOWED_TO_MERGE]"
@@ -103,7 +103,7 @@ runs:
         fi
 
     - name: Check if issue key exists in alternative Jira
-      if: env.ISSUE_KEY_FOUND == 0 && inputs.jira_alternative_base_url != '' && inputs.jira_alternative_user_email != '' && inputs.jira_alternative_api_token != ''
+      if: env.ISSUE_KEY_FOUND == 0 && env.PREFIX_TO_IGNORE_FOUND==0 && inputs.jira_alternative_base_url != '' && inputs.jira_alternative_user_email != '' && inputs.jira_alternative_api_token != ''
       env:
         JIRA_BASE_URL: ${{ inputs.jira_alternative_base_url }}
         JIRA_USER_EMAIL: ${{ inputs.jira_alternative_user_email }}
@@ -116,9 +116,6 @@ runs:
         ISSUE_KEY=$(echo "$POSSIBLE_ISSUE_REFERENCE" | grep -oE '[A-Z0-9]{1,10}-[0-9]+' | head -n 1)
         echo "ISSUE_KEY=$ISSUE_KEY" >> "$GITHUB_ENV"
         echo "Alternative Jira check"
-        echo "Searching for Jira issue $ISSUE_KEY at $JIRA_BASE_URL"
-        JIRA_API_ISSUE_ENDPOINT="$JIRA_BASE_URL/rest/api/2/issue/$ISSUE_KEY?fields=key,status"
-        echo "Requesting issue at $JIRA_API_ISSUE_ENDPOINT"
 
         echo "DEFAULT_HOTFIX_PREFIX [$DEFAULT_HOTFIX_PREFIX]"
         echo "DEFAULT_REVERT_PREFIX [$DEFAULT_REVERT_PREFIX]"
@@ -136,6 +133,9 @@ runs:
           exit 0
         fi
 
+        echo "Searching for Jira issue $ISSUE_KEY at $JIRA_BASE_URL"
+        JIRA_API_ISSUE_ENDPOINT="$JIRA_BASE_URL/rest/api/2/issue/$ISSUE_KEY?fields=key,status"
+        echo "Requesting issue at $JIRA_API_ISSUE_ENDPOINT"
         JIRA_RESPONSE_STATUS=$(curl --request GET --url "$JIRA_API_ISSUE_ENDPOINT" --user "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" | jq .fields.status.name) >> "$GITHUB_ENV"
         echo "Response Status [$JIRA_RESPONSE_STATUS]"
         echo "JIRA_STATUS_ALLOWED_TO_MERGE -> [$JIRA_STATUS_ALLOWED_TO_MERGE]"
