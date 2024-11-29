@@ -43,6 +43,7 @@ runs:
         echo "POSSIBLE_ISSUE_REFERENCE=${{ inputs.possible_issue_reference }}" >> "$GITHUB_ENV"
         echo "ISSUE_KEY_FOUND=0" >> "$GITHUB_ENV"
         echo "PREFIX_TO_IGNORE_FOUND=0" >> "$GITHUB_ENV"
+        echo "BRANCH_NAME=0" >> "$GITHUB_ENV"
 
     - name: Get Possible Issue Reference - Default / Push Event in PR
       if: env.POSSIBLE_ISSUE_REFERENCE == '' && github.event_name == 'push' && github.event.pull_request != null
@@ -59,6 +60,16 @@ runs:
       shell: bash
       run: echo "POSSIBLE_ISSUE_REFERENCE=${{ github.head_ref }} ${{ github.event.pull_request.title }}" >> "$GITHUB_ENV"
 
+    - name: Get Branch name for Hotfix/Revert exceptions
+      shell: bash
+      run: |
+        if [[ -n "${{ github.event.pull_request.head.ref }}" ]]; then
+          echo "BRANCH_NAME=${{ github.event.pull_request.head.ref }}" >> "$GITHUB_ENV"
+        else
+          echo "BRANCH_NAME=${{ github.ref_name }}" >> "$GITHUB_ENV"
+        fi
+        echo "Branch name $BRANCH_NAME"
+
     - name: Check if issue key exists
       env:
         JIRA_BASE_URL: ${{ inputs.jira_base_url }}
@@ -67,6 +78,7 @@ runs:
         JIRA_STATUS_ALLOWED_TO_MERGE: ${{ inputs.JIRA_STATUS_ALLOWED_TO_MERGE }}
         DEFAULT_HOTFIX_PREFIX: ${{ inputs.default_hotfix_prefix }}
         DEFAULT_REVERT_PREFIX: ${{ inputs.default_revert_prefix }}
+        BRANCH_NAME: ${{ env.BRANCH_NAME }}
       shell: bash
       run: |
         ISSUE_KEY=$(echo "$POSSIBLE_ISSUE_REFERENCE" | grep -oE '[a-zA-Z0-9]{1,10}-[0-9]+' | head -n 1)
@@ -74,15 +86,15 @@ runs:
 
         echo "DEFAULT_HOTFIX_PREFIX [$DEFAULT_HOTFIX_PREFIX]"
         echo "DEFAULT_REVERT_PREFIX [$DEFAULT_REVERT_PREFIX]"
-        echo "Branch name ${{ github.event.pull_request.head.ref }}"
+        echo "DEFAULT_REVERT_PREFIX [$DEFAULT_REVERT_PREFIX]"
 
-        if [[ "${{ github.event.pull_request.head.ref }}" == "${{ env.DEFAULT_HOTFIX_PREFIX }}"* ]]; then
+        if [[ "${{ env.BRANCH_NAME }}" == "${{ env.DEFAULT_HOTFIX_PREFIX }}"* ]]; then
           echo "PREFIX_TO_IGNORE_FOUND=1" >> "$GITHUB_ENV"
           echo "Hotfix branch detected, skipping Jira issue status check."
           exit 0
         fi
 
-        if [[ "${{ github.event.pull_request.head.ref }}" == "${{ env.DEFAULT_REVERT_PREFIX }}"* ]]; then
+        if [[ "${{ env.BRANCH_NAME }}" == "${{ env.DEFAULT_REVERT_PREFIX }}"* ]]; then
           echo "PREFIX_TO_IGNORE_FOUND=1" >> "$GITHUB_ENV"
           echo "Revert branch detected, skipping Jira issue status check."
           exit 0
