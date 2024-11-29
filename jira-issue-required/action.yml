@@ -86,7 +86,7 @@ runs:
 
         echo "DEFAULT_HOTFIX_PREFIX [$DEFAULT_HOTFIX_PREFIX]"
         echo "DEFAULT_REVERT_PREFIX [$DEFAULT_REVERT_PREFIX]"
-        echo "DEFAULT_REVERT_PREFIX [$DEFAULT_REVERT_PREFIX]"
+        echo "BRANCH_NAME [$BRANCH_NAME]"
 
         if [[ "${{ env.BRANCH_NAME }}" == "${{ env.DEFAULT_HOTFIX_PREFIX }}"* ]]; then
           echo "PREFIX_TO_IGNORE_FOUND=1" >> "$GITHUB_ENV"
