@@ -68,7 +68,6 @@ runs:
         else
           echo "BRANCH_NAME=${{ github.ref_name }}" >> "$GITHUB_ENV"
         fi
-        echo "Branch name is $BRANCH_NAME"
 
     - name: Check if issue key exists
       env:
