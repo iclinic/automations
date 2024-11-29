@@ -74,15 +74,15 @@ runs:
 
         echo "DEFAULT_HOTFIX_PREFIX [$DEFAULT_HOTFIX_PREFIX]"
         echo "DEFAULT_REVERT_PREFIX [$DEFAULT_REVERT_PREFIX]"
-        echo "Branch name ${{ github.head_ref }}"
+        echo "Branch name ${{ github.event.pull_request.head.ref }}"
 
-        if [[ "${{ github.head_ref }}" == "${{ env.DEFAULT_HOTFIX_PREFIX }}"* ]]; then
+        if [[ "${{ github.event.pull_request.head.ref }}" == "${{ env.DEFAULT_HOTFIX_PREFIX }}"* ]]; then
           echo "PREFIX_TO_IGNORE_FOUND=1" >> "$GITHUB_ENV"
           echo "Hotfix branch detected, skipping Jira issue status check."
           exit 0
         fi
 
-        if [[ "${{ github.head_ref }}" == "${{ env.DEFAULT_REVERT_PREFIX }}"* ]]; then
+        if [[ "${{ github.event.pull_request.head.ref }}" == "${{ env.DEFAULT_REVERT_PREFIX }}"* ]]; then
           echo "PREFIX_TO_IGNORE_FOUND=1" >> "$GITHUB_ENV"
           echo "Revert branch detected, skipping Jira issue status check."
           exit 0
