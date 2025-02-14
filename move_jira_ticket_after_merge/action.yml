@@ -1,0 +1,67 @@
+name: Merge Webhook
+author: 'José Luis da Cruz Junior'
+description: 'Action para garantir card do Jira será movido para a próxima etapa após o merge.'
+
+on:
+  pull_request:
+    types: [closed]
+
+inputs:
+  jira_base_url_merge_workflow:
+    required: true
+    description: https://<your_org>.atlassian.net
+  jira_api_merge_transition_id_subtask_type:
+    required: true
+    description: Integer ID fot the transition to be executed when the issue is a subtask issuetype
+    default: 341
+  jira_api_merge_transition_id_standard_type:
+    required: true
+    description: Integer ID fot the transition to be executed when the issue is a standard issuetype
+    default: 371
+  jira_api_merge_useremail:
+    required: true
+    description: Jira User email authorized to make the transition
+  jira_api_merge_token:
+    required: true
+    description: base64(user_email:jira_api_token)
+
+jobs:
+  move_jira_ticket_after_merge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Requesting Issue Transition on Jira API
+        if: github.event.pull_request.merged == true
+        run: |
+            echo "GITHUB_HEAD_REF: $GITHUB_HEAD_REF"
+            echo "github_event: ${{ github.event.pull_request.merged }}"
+            ISSUE_KEY=$(echo "$GITHUB_HEAD_REF" | grep -oE '[a-zA-Z0-9]{1,10}-[0-9]+' | head -n 1)
+            echo "ISSUE_KEY=$ISSUE_KEY" >> "$GITHUB_ENV"
+            echo "Issue Key: $ISSUE_KEY"
+
+
+            JIRA_API_ISSUE_ENDPOINT="${{ inputs.jira_base_url_merge_workflow }}/rest/api/2/issue/$ISSUE_KEY"
+            echo "Requesting issuetype at $JIRA_API_ISSUE_ENDPOINT"
+            IS_SUBTASK=$(curl --request GET --url "$JIRA_API_ISSUE_ENDPOINT" --header 'Authorization: Basic ${{inputs.jira_api_merge_token}}' | jq .fields.issuetype.subtask) >> "$GITHUB_ENV"
+            echo "IS_SUBTASK=$IS_SUBTASK" >> "$GITHUB_ENV"
+
+            if [ "$IS_SUBTASK" = "true" ]; then
+              TRANSITION_ID=${{ inputs.jira_api_merge_transition_id_subtask_type }}
+            else
+              TRANSITION_ID=${{ inputs.jira_api_merge_transition_id_standard_type }}
+            fi
+            TRANSITION_ID=$(echo "$TRANSITION_ID" | jq -r 'tonumber')
+            echo "TRANSITION_ID=$TRANSITION_ID" >> "$GITHUB_ENV"
+            echo "IS_SUBTASK : $IS_SUBTASK"
+            echo "Transition ID: $TRANSITION_ID"
+
+            echo "Requesting transition for issue $ISSUE_KEY in behalf of: ${{inputs.jira_api_merge_useremail}}"
+            REQUEST_URL="${{ inputs.jira_base_url_merge_workflow }}/rest/api/2/issue/$ISSUE_KEY/transitions"
+            echo "REQUEST_URL=$REQUEST_URL" >> "$GITHUB_ENV"
+            echo "REQUEST URL: $REQUEST_URL"
+
+            REQUEST_BODY="{\"transition\":{\"id\":$TRANSITION_ID}}"
+            echo "REQUEST_BODY=$REQUEST_BODY" >> "$GITHUB_ENV"
+            echo "REQUEST_BODY: $REQUEST_BODY"
+            TRANSITION_RESPONSE=$(curl --request POST --url "$REQUEST_URL" --header 'Authorization: Basic ${{inputs.jira_api_merge_token}}' --header 'Content-Type: application/json' --data "$REQUEST_BODY")
+            echo "TRANSITION_RESPONSE=$TRANSITION_RESPONSE" >> "$GITHUB_ENV"
+            echo "TRANSITION_RESPONSE: $TRANSITION_RESPONSE"

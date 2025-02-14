@@ -1,0 +1,19 @@
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  jira_issue_required:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Automations Repository
+        uses: actions/checkout@v4
+
+      - name: Check Whether PR/commit is associated to a Jira issue
+        uses: ./move_jira_ticket_after_merge
+        with:
+          jira_base_url_merge_workflow: ${{ vars.JIRA_BASE_URL_MERGE_WORKFLOW }}
+          jira_api_merge_transition_id_subtask_type: ${{ vars.JIRA_API_MERGE_TRANSITION_ID_SUBTASK_TYPE }}
+          jira_api_merge_transition_id_standard_type: ${{ vars.JIRA_API_MERGE_TRANSITION_ID_STANDARD_TYPE }}
+          jira_api_merge_useremail: ${{ vars.JIRA_API_MERGE_USEREMAIL }}
+          jira_api_merge_token: ${{ secrets.JIRA_API_MERGE_TOKEN }}
