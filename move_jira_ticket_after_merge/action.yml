@@ -24,13 +24,17 @@ inputs:
   jira_api_merge_token:
     required: true
     description: base64(user_email:jira_api_token)
+  is_pr_merged:
+    required: true
+    description: 'Check if the PR was merged from github.event.pull_request.merged'
+
 
 jobs:
   move_jira_ticket_after_merge:
     runs-on: ubuntu-latest
     steps:
       - name: Requesting Issue Transition on Jira API
-        if: github.event.pull_request.merged == true
+        if: is_pr_merged == true
         run: |
             echo "GITHUB_HEAD_REF: $GITHUB_HEAD_REF"
             echo "github_event: ${{ github.event.pull_request.merged }}"
