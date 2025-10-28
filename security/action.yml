@@ -29,12 +29,28 @@ inputs:
     description: 'Sonar Python Coverage Report Paths'
     default: ''
     required: false
+  sonar_javascript_coverage_lcov_reportpaths:
+    description: 'Sonar Javascript Coverage Lcov Report Paths'
+    default: ''
+    required: false
   sonar_tests:
     description: 'Sonar Tests Path'
     default: ''
     required: false
   sonar_exclusions:
     description: 'Sonar Exclusions'
+    default: ''
+    required: false
+  sonar_coverage_exclusions:
+    description: 'Sonar Coverage Exclusions'
+    default: ''
+    required: false
+  sonar_test_inclusions:
+    description: 'Sonar Test Inclusions'
+    default: ''
+    required: false
+  project_version:
+    description: 'Project Version'
     default: ''
     required: false
 
@@ -66,9 +82,12 @@ runs:
         ${{ inputs.sonar_language != '' && format('-Dsonar.language={0}', inputs.sonar_language) || '' }}
         ${{ inputs.sonar_python_coverage_reportpaths != '' && format('-Dsonar.python.coverage.reportPaths={0}', inputs.sonar_python_coverage_reportpaths) || '' }}
         ${{ inputs.sonar_python_version != '' && format('-Dsonar.python.version={0}', inputs.sonar_python_version) || '' }}
-        ${{ inputs.sonar_tests != '' && format('-Dsonar.tests={0}', inputs.sonar_tests) || '' }}
+        ${{ inputs.sonar_javascript_coverage_lcov_reportpaths != '' && format('-Dsonar.javascript.lcov.reportPaths={0}', inputs.sonar_javascript_coverage_lcov_reportpaths) || '' }}
         ${{ inputs.sonar_tests != '' && format('-Dsonar.tests={0}', inputs.sonar_tests) || '' }}
         ${{ inputs.sonar_exclusions != '' && format('-Dsonar.exclusions={0}', inputs.sonar_exclusions) || '' }}
+        ${{ inputs.sonar_coverage_exclusions != '' && format('-Dsonar.coverage.exclusions={0}', inputs.sonar_coverage_exclusions) || '' }}
+        ${{ inputs.sonar_test_inclusions != '' && format('-Dsonar.test.inclusions={0}', inputs.sonar_test_inclusions) || '' }}
+        ${{ github.event_name == 'push' && inputs.project_version != '' && format('-Dsonar.projectVersion={0}', github.ref_name) || '' }}
       env:
         SONAR_HOST_URL: http://sonar.afya.tools:9000/
         APPLICATION_NAME: ${{ github.event.repository.name }}
