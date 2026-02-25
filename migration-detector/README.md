@@ -168,7 +168,7 @@ Remoção de alguma coluna ou tabela:
 - `github_token` (obrigatório): token do GitHub para ler metadados do PR. Quando `ai_api_key` não é fornecido, também é usado como credencial na GitHub Models API.
 - `ai_api_url` (opcional, default `https://models.inference.ai.azure.com`): URL base da API de IA. Altere apenas para integração com hub externo.
 - `ai_api_key` (opcional): chave de API do hub externo de IA. **Quando omitido**, a action usa o `github_token` contra a GitHub Models API sem nenhum secret adicional.
-- `ai_model` (opcional, default `openai/gpt-4o-mini`): modelo de IA a utilizar. O default é compatível com GitHub Models; ajuste para o modelo disponível no hub externo.
+- `ai_model` (opcional, default `gpt-4o-mini`): modelo de IA a utilizar. O default é compatível com GitHub Models; ajuste para o modelo disponível no hub externo.
 - `migration_paths` (opcional): globs de entrada para arquivos de migração.
 - `ignore_name_contains` (opcional, default `dump`): termos para ignorar no nome do arquivo.
 - `slack_webhook_url` (obrigatório): webhook para envio da mensagem ao canal Slack.

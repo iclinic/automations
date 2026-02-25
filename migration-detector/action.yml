@@ -25,7 +25,7 @@ inputs:
       `github_token` contra a GitHub Models API, sem necessidade de secret adicional.
   ai_model:
     required: false
-    default: 'openai/gpt-4o-mini'
+    default: 'gpt-4o-mini'
     description: >
       Nome do modelo de IA a utilizar. Padrão compatível com GitHub Models.
       Ajuste conforme o modelo disponível no seu hub externo, se aplicável.
