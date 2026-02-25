@@ -107,6 +107,9 @@ runs:
           exit 0
         fi
 
+        echo "==> Todos os arquivos alterados no PR:"
+        echo "$CHANGED"
+
         # Monta regex de inclusão a partir dos globs separados por vírgula
         INCLUDE_REGEX=""
 
@@ -125,7 +128,9 @@ runs:
             | sed 's|\*\*|DSTAR|g' \
             | sed 's|\*|[^/]*|g' \
             | sed 's|DSTAR|.*|g')
-          INCLUDE_REGEX="${INCLUDE_REGEX}${regex}|"
+          # Permite também match sem diretório (arquivo na raiz ou prefixo parcial)
+          regex_root=$(echo "$regex" | sed 's|^\.\*/||')
+          INCLUDE_REGEX="${INCLUDE_REGEX}${regex}|${regex_root}|"
         done
         INCLUDE_REGEX="${INCLUDE_REGEX%|}"
         echo "==> INCLUDE_REGEX: $INCLUDE_REGEX"
@@ -269,7 +274,7 @@ runs:
           "has_db_change": true,
           "highest_severity": "breaking",
           "confidence": 0.95,
-          "MO": [
+          "items": [
             {
               "file": "caminho/arquivo.py",
               "severity": "breaking",
@@ -353,7 +358,8 @@ runs:
         }
         emoji, label = severity_meta.get(severity, ("⚪", severity))
 
-        items = result.get("items", [])
+        # Suporte a ambas as chaves: "items" (correto) e "MO" (resposta legada do modelo)
+        items = result.get("items") or result.get("MO") or []
         reasons = [i["reason"] for i in items if i.get("reason") and i.get("severity") != "none"]
         description = "\n• ".join(reasons) if reasons else "Alteração de banco detectada."
         if reasons:
@@ -426,7 +432,7 @@ runs:
     # -------------------------------------------------------------------------
     - name: Notify | Post to Slack
       id: slack
-      if: steps.collect.outputs.has_files == 'true' && steps.analyze.outputs.has_db_change == 'true'
+      if: steps.collect.outputs.has_files == 'true'
       shell: bash
       env:
         SLACK_WEBHOOK_URL: ${{ inputs.slack_webhook_url }}
