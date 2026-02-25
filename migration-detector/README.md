@@ -31,7 +31,7 @@ Verifique (ou crie) cada secret em `https://github.com/organizations/iclinic/set
 
 | Secret | Descrição | Obrigatório |
 |---|---|---|
-| `SLACK_WEBHOOK_URL_DATA_ALERTS` | Incoming Webhook do canal de alertas do time de dados. Crie em [api.slack.com/apps](https://api.slack.com/apps) | Sempre |
+| `SLACK_WEBHOOK_URL` | Incoming Webhook do canal de alertas do time de dados. Crie em [api.slack.com/apps](https://api.slack.com/apps) | Sempre |
 | `AI_HUB_URL` | URL base do hub externo de IA (ex.: `https://ia.suaempresa.com/v1`) | Apenas se **não** usar GitHub Models |
 | `AI_HUB_API_KEY` | Chave de API do hub externo de IA | Apenas se **não** usar GitHub Models |
 
@@ -71,7 +71,7 @@ jobs:
         uses: iclinic/automations/migration-detector@v1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          slack_webhook_url: ${{ secrets.SLACK_WEBHOOK_URL_DATA_ALERTS }}
+          slack_webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
           slack_channel: "#data-impact-alerts"
           fail_on_breaking: "true"
 ```

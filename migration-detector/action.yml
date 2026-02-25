@@ -264,10 +264,12 @@ runs:
         - breaking (Breaking Change): remover campo, renomear campo, alterar tipo de dado, alterar chave primária, remover tabela consumida.
 
         Regras:
-        1. Se o arquivo não contiver nenhuma mudança de banco de dados, classifique como "none".
-        2. Prefira a classificação mais conservadora quando houver dúvida.
-        3. O campo "reason" deve ser uma frase curta em português descrevendo objetivamente a mudança.
-        4. O campo "confidence" deve refletir sua certeza (0.0 a 1.0).
+        1. Inclua TODOS os arquivos fornecidos no array "items", exatamente um objeto por arquivo — mesmo que a classificação seja "none".
+        2. Se o arquivo não contiver nenhuma mudança de banco de dados, classifique como "none".
+        3. Prefira a classificação mais conservadora quando houver dúvida.
+        4. O campo "reason" deve ser uma frase curta em português descrevendo objetivamente a mudança.
+        5. O campo "confidence" deve refletir sua certeza (0.0 a 1.0).
+        6. O campo "highest_severity" deve refletir a severidade máxima entre todos os arquivos.
 
         Responda SOMENTE com JSON válido neste formato exato, sem nenhum texto extra ou bloco de código markdown:
         {
@@ -478,7 +480,7 @@ runs:
           -X POST \
           -H "Content-Type: application/json" \
           --data "$PAYLOAD" \
-          "$SLACK_WEBHOOK_URL")
+          "$SLACK_WEBHOOK_URL") || true
 
         echo "==> Slack HTTP status: $HTTP_STATUS"
 
