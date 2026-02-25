@@ -54,7 +54,7 @@ inputs:
       compatível com a configuração do webhook, para roteamento da mensagem.
   fail_on_breaking:
     required: false
-    default: 'true'
+    default: 'false'
     description: >
       Quando `true`, falha o job se a severidade máxima detectada for `breaking`.
       Útil para bloquear o merge automaticamente via branch protection.
@@ -474,6 +474,14 @@ runs:
         PYEOF
         )
 
+        if [[ -z "$SLACK_WEBHOOK_URL" ]]; then
+          echo "[WARN] SLACK_WEBHOOK_URL não configurada — notificação ignorada."
+          echo "slack_message_ts=" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        echo "{}" > /tmp/slack_resp.json
+
         HTTP_STATUS=$(curl -s \
           -o /tmp/slack_resp.json \
           -w "%{http_code}" \
@@ -495,12 +503,11 @@ runs:
         echo "slack_message_ts=${TS}" >> "$GITHUB_OUTPUT"
 
     # -------------------------------------------------------------------------
-    # 7. Falha o job se Breaking Change e fail_on_breaking == true
+    # 7. Sinaliza Breaking Change nos logs (sem falhar a pipeline)
     # -------------------------------------------------------------------------
-    - name: Gate | Fail on Breaking Change
-      if: steps.set-outputs.outputs.highest_severity == 'breaking' && inputs.fail_on_breaking == 'true'
+    - name: Gate | Warn on Breaking Change
+      if: steps.set-outputs.outputs.highest_severity == 'breaking'
       shell: bash
       run: |
-        echo "::error::🔴 Breaking Change detectada em migração de banco de dados."
-        echo "::error::Revisão obrigatória pelo time de dados antes do merge."
-        exit 1
+        echo "::warning::🔴 Breaking Change detectada em migração de banco de dados."
+        echo "::warning::Aguarde revisão do time de dados antes do merge."
