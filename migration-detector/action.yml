@@ -109,16 +109,26 @@ runs:
 
         # Monta regex de inclusão a partir dos globs separados por vírgula
         INCLUDE_REGEX=""
+
+        echo "MIGRATION_PATHS: $MIGRATION_PATHS"
+
         IFS=',' read -ra PATTERNS <<< "$MIGRATION_PATHS"
         for pattern in "${PATTERNS[@]}"; do
-          # Converte glob em regex:  ** -> .*  |  * -> [^/]*  |  . -> \.
+          # Ordem importa:
+          #   1. Escapa pontos literais primeiro  (. -> \.)
+          #   2. Protege ** com placeholder       (** -> DSTAR)
+          #   3. Converte * simples               (* -> [^/]*)
+          #   4. Restaura placeholder como .*     (DSTAR -> .*)
+          # Sem placeholder, o passo 3 corromperia o .* gerado no passo 2.
           regex=$(echo "$pattern" \
-            | sed 's|\*\*|.*|g' \
+            | sed 's|\.|\\.|g' \
+            | sed 's|\*\*|DSTAR|g' \
             | sed 's|\*|[^/]*|g' \
-            | sed 's|\.|\\.|g')
+            | sed 's|DSTAR|.*|g')
           INCLUDE_REGEX="${INCLUDE_REGEX}${regex}|"
         done
         INCLUDE_REGEX="${INCLUDE_REGEX%|}"
+        echo "==> INCLUDE_REGEX: $INCLUDE_REGEX"
 
         FILTERED=$(echo "$CHANGED" | grep -E "$INCLUDE_REGEX" || true)
 
