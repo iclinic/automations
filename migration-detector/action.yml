@@ -259,7 +259,7 @@ runs:
           "has_db_change": true,
           "highest_severity": "breaking",
           "confidence": 0.95,
-          "items": [
+          "MO": [
             {
               "file": "caminho/arquivo.py",
               "severity": "breaking",
