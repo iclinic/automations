@@ -1,0 +1,488 @@
+name: 'Migration Detector'
+author: 'iclinic'
+description: >
+  Detecta arquivos de migração de banco de dados em PRs, classifica o impacto via IA
+  e notifica o time de dados em um canal do Slack.
+
+inputs:
+  github_token:
+    required: true
+    description: >
+      Token do GitHub. Usado para ler metadados do PR e, por padrão, como chave de autenticação
+      na GitHub Models API (models.inference.ai.azure.com). Requer permissão `models: read`
+      no workflow quando utilizado como chave de IA.
+  ai_api_url:
+    required: false
+    default: 'https://models.inference.ai.azure.com'
+    description: >
+      URL base da API de IA compatível com OpenAI. Padrão: GitHub Models API.
+      Para uso com hub externo, forneça a URL do serviço e preencha `ai_api_key`.
+  ai_api_key:
+    required: false
+    default: ''
+    description: >
+      Chave de API para o hub externo de IA. Quando vazio (padrão), a action usa o
+      `github_token` contra a GitHub Models API, sem necessidade de secret adicional.
+  ai_model:
+    required: false
+    default: 'openai/gpt-4o-mini'
+    description: >
+      Nome do modelo de IA a utilizar. Padrão compatível com GitHub Models.
+      Ajuste conforme o modelo disponível no seu hub externo, se aplicável.
+  migration_paths:
+    required: false
+    default: '**/*.sql,**/migrations/*.py,**/alembic/versions/*.py,**/*AutoMigrate.ts,**/*automigrate.ts'
+    description: >
+      Globs separados por vírgula para identificar arquivos de migração. Cobre:
+      SQL puro, Django (migrations/*.py), Alembic/FastAPI (alembic/versions/*.py)
+      e TypeScript com AutoMigrate.
+  ignore_name_contains:
+    required: false
+    default: 'dump'
+    description: >
+      Termos (separados por vírgula, case-insensitive) presentes no nome do arquivo
+      que indicam que ele deve ser ignorado. Padrão: `dump` (arquivos de dump local).
+  slack_webhook_url:
+    required: true
+    description: >
+      Webhook do Slack para envio da notificação de impacto ao canal do time de dados.
+  slack_channel:
+    required: false
+    default: ''
+    description: >
+      Nome lógico do canal Slack (ex.: #data-impact-alerts). Usado para log e, quando
+      compatível com a configuração do webhook, para roteamento da mensagem.
+  fail_on_breaking:
+    required: false
+    default: 'true'
+    description: >
+      Quando `true`, falha o job se a severidade máxima detectada for `breaking`.
+      Útil para bloquear o merge automaticamente via branch protection.
+  minimum_confidence:
+    required: false
+    default: '0.70'
+    description: >
+      Limiar mínimo de confiança da IA (0 a 1). Abaixo desse valor, a classificação
+      é promovida para `controlled` por segurança, evitando falsos negativos silenciosos.
+
+outputs:
+  has_db_change:
+    description: '`true` se ao menos um arquivo de migração com mudança de banco for detectado.'
+    value: ${{ steps.set-outputs.outputs.has_db_change }}
+  highest_severity:
+    description: 'Severidade máxima encontrada: `safe`, `controlled`, `breaking` ou `none`.'
+    value: ${{ steps.set-outputs.outputs.highest_severity }}
+  confidence:
+    description: 'Confiança da classificação retornada pela IA (0 a 1).'
+    value: ${{ steps.set-outputs.outputs.confidence }}
+  slack_message_ts:
+    description: 'Timestamp da mensagem postada no Slack (disponível apenas com Incoming Webhooks v2+).'
+    value: ${{ steps.slack.outputs.slack_message_ts }}
+
+runs:
+  using: composite
+  steps:
+
+    # -------------------------------------------------------------------------
+    # 1. Coleta os arquivos de migração alterados no PR
+    # -------------------------------------------------------------------------
+    - name: Collect | Find changed migration files
+      id: collect
+      shell: bash
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        MIGRATION_PATHS: ${{ inputs.migration_paths }}
+        IGNORE_TERMS: ${{ inputs.ignore_name_contains }}
+      run: |
+        echo "==> Coletando arquivos alterados entre $BASE_SHA e $HEAD_SHA"
+
+        CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" 2>/dev/null \
+          || git diff --name-only HEAD~1 HEAD 2>/dev/null \
+          || echo "")
+
+        if [[ -z "$CHANGED" ]]; then
+          echo "Nenhum arquivo alterado encontrado."
+          echo "has_files=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        # Monta regex de inclusão a partir dos globs separados por vírgula
+        INCLUDE_REGEX=""
+        IFS=',' read -ra PATTERNS <<< "$MIGRATION_PATHS"
+        for pattern in "${PATTERNS[@]}"; do
+          # Converte glob em regex:  ** -> .*  |  * -> [^/]*  |  . -> \.
+          regex=$(echo "$pattern" \
+            | sed 's|\*\*|.*|g' \
+            | sed 's|\*|[^/]*|g' \
+            | sed 's|\.|\\.|g')
+          INCLUDE_REGEX="${INCLUDE_REGEX}${regex}|"
+        done
+        INCLUDE_REGEX="${INCLUDE_REGEX%|}"
+
+        FILTERED=$(echo "$CHANGED" | grep -E "$INCLUDE_REGEX" || true)
+
+        if [[ -z "$FILTERED" ]]; then
+          echo "Nenhum arquivo de migração encontrado após filtro de inclusão."
+          echo "has_files=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        # Remove arquivos cujo nome contenha os termos de exclusão (ex.: dump)
+        FINAL="$FILTERED"
+        if [[ -n "$IGNORE_TERMS" ]]; then
+          IFS=',' read -ra IGNORE_LIST <<< "$IGNORE_TERMS"
+          for term in "${IGNORE_LIST[@]}"; do
+            term=$(echo "$term" | xargs)
+            FINAL=$(echo "$FINAL" | grep -Eiv "$term" || true)
+          done
+        fi
+
+        FINAL=$(echo "$FINAL" | grep -v "^$" | sort -u || true)
+
+        if [[ -z "$FINAL" ]]; then
+          echo "Todos os arquivos encontrados foram ignorados (ex.: dump)."
+          echo "has_files=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        echo "==> Arquivos de migração candidatos:"
+        echo "$FINAL"
+
+        # Serializa lista com delimitador | para passar via output
+        ENCODED=$(echo "$FINAL" | tr '\n' '|' | sed 's/|$//')
+        echo "migration_files=$ENCODED" >> "$GITHUB_OUTPUT"
+        echo "has_files=true" >> "$GITHUB_OUTPUT"
+
+    # -------------------------------------------------------------------------
+    # 2. Prepara ambiente Python
+    # -------------------------------------------------------------------------
+    - name: Setup | Python
+      if: steps.collect.outputs.has_files == 'true'
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Setup | Install openai SDK
+      if: steps.collect.outputs.has_files == 'true'
+      shell: bash
+      run: pip install openai --quiet --disable-pip-version-check
+
+    # -------------------------------------------------------------------------
+    # 3. Classifica as migrações com IA e gera o texto para o Slack
+    #
+    # Provedor primário:  GitHub Models API  (github_token + models: read)
+    #   endpoint: https://models.inference.ai.azure.com
+    #   sem custo adicional, sem secret extra
+    #
+    # Provedor fallback:  Hub externo de IA  (ai_api_key + ai_api_url custom)
+    #   ativado automaticamente quando ai_api_key é fornecido
+    # -------------------------------------------------------------------------
+    - name: Analyze | Classify migrations with AI
+      id: analyze
+      if: steps.collect.outputs.has_files == 'true'
+      shell: python
+      env:
+        MIGRATION_FILES: ${{ steps.collect.outputs.migration_files }}
+        AI_API_URL: ${{ inputs.ai_api_url }}
+        AI_API_KEY: ${{ inputs.ai_api_key }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+        AI_MODEL: ${{ inputs.ai_model }}
+        MINIMUM_CONFIDENCE: ${{ inputs.minimum_confidence }}
+        PR_URL: ${{ github.event.pull_request.html_url }}
+        PR_TITLE: ${{ github.event.pull_request.title }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        REPO: ${{ github.repository }}
+      run: |
+        import os
+        import json
+        import sys
+
+        from openai import OpenAI
+
+        # ------------------------------------------------------------------
+        # Resolve credenciais de IA
+        # ------------------------------------------------------------------
+        ai_api_key   = os.environ.get("AI_API_KEY", "").strip()
+        github_token = os.environ.get("GITHUB_TOKEN", "").strip()
+        api_key = ai_api_key if ai_api_key else github_token
+        api_url = os.environ["AI_API_URL"]
+        model   = os.environ["AI_MODEL"]
+
+        using_github_models = not bool(ai_api_key)
+        print(f"==> Provedor de IA: {'GitHub Models API' if using_github_models else 'Hub externo'}")
+        print(f"==> URL: {api_url}  |  Modelo: {model}")
+
+        client = OpenAI(base_url=api_url, api_key=api_key)
+
+        # ------------------------------------------------------------------
+        # Lê os arquivos de migração
+        # ------------------------------------------------------------------
+        files_raw = os.environ.get("MIGRATION_FILES", "")
+        files = [f.strip() for f in files_raw.split("|") if f.strip()]
+
+        file_contents: dict = {}
+        for path in files:
+            try:
+                with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                    content = fh.read(6000)  # 6 KB por arquivo para não exceder contexto
+                file_contents[path] = content
+                print(f"  [OK] {path} ({len(content)} chars)")
+            except Exception as exc:
+                file_contents[path] = f"[Erro ao ler arquivo: {exc}]"
+                print(f"  [WARN] {path}: {exc}", file=sys.stderr)
+
+        context_block = "\n\n".join(
+            f"=== {p} ===\n{c}" for p, c in file_contents.items()
+        )
+
+        # ------------------------------------------------------------------
+        # Prompt de sistema com os critérios de classificação
+        # ------------------------------------------------------------------
+        SYSTEM_PROMPT = """Você é um analista especialista em migrações de banco de dados.
+        Analise os arquivos de migração fornecidos e classifique cada um de acordo com os critérios abaixo.
+
+        Critérios de classificação:
+        - safe (Safe Change): adição de coluna opcional, nova tabela não consumida, novo valor enum com fallback, novo índice, campo novo na camada analítica.
+        - controlled (Mudança Controlada): alterar tamanho de varchar, alterar precisão numérica, tornar campo nullable, alterar valor default.
+        - breaking (Breaking Change): remover campo, renomear campo, alterar tipo de dado, alterar chave primária, remover tabela consumida.
+
+        Regras:
+        1. Se o arquivo não contiver nenhuma mudança de banco de dados, classifique como "none".
+        2. Prefira a classificação mais conservadora quando houver dúvida.
+        3. O campo "reason" deve ser uma frase curta em português descrevendo objetivamente a mudança.
+        4. O campo "confidence" deve refletir sua certeza (0.0 a 1.0).
+
+        Responda SOMENTE com JSON válido neste formato exato, sem nenhum texto extra ou bloco de código markdown:
+        {
+          "has_db_change": true,
+          "highest_severity": "breaking",
+          "confidence": 0.95,
+          "items": [
+            {
+              "file": "caminho/arquivo.py",
+              "severity": "breaking",
+              "reason": "Remoção do campo qty na tabela orders"
+            }
+          ]
+        }"""
+
+        USER_PROMPT = (
+            f"Analise as seguintes migrações de banco de dados:\n\n"
+            f"{context_block}\n\n"
+            f"PR #{os.environ.get('PR_NUMBER')} — {os.environ.get('PR_TITLE')}\n"
+            f"Repositório: {os.environ.get('REPO')}\n\n"
+            f"Retorne SOMENTE o JSON solicitado."
+        )
+
+        # ------------------------------------------------------------------
+        # Chama a IA
+        # ------------------------------------------------------------------
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user",   "content": USER_PROMPT},
+                ],
+                temperature=0.1,
+                max_tokens=1200,
+            )
+            raw = response.choices[0].message.content.strip()
+
+            # Remove bloco de código markdown se o modelo embrulhar a resposta
+            if raw.startswith("```"):
+                parts = raw.split("```")
+                raw = parts[1] if len(parts) >= 2 else raw
+                if raw.startswith("json"):
+                    raw = raw[4:].strip()
+
+            result = json.loads(raw)
+            print(f"==> Resposta da IA:\n{json.dumps(result, ensure_ascii=False, indent=2)}")
+
+        except Exception as exc:
+            print(f"[ERRO] Falha na análise com IA: {exc}", file=sys.stderr)
+            # Fallback conservador: marca como controlled para revisão manual
+            result = {
+                "has_db_change": True,
+                "highest_severity": "controlled",
+                "confidence": 0.0,
+                "items": [
+                    {
+                        "file": f,
+                        "severity": "controlled",
+                        "reason": "Análise automática falhou — revisão manual necessária",
+                    }
+                    for f in files
+                ],
+            }
+
+        # ------------------------------------------------------------------
+        # Eleva severidade se confiança abaixo do limiar
+        # ------------------------------------------------------------------
+        min_conf   = float(os.environ.get("MINIMUM_CONFIDENCE", "0.70"))
+        confidence = float(result.get("confidence", 1.0))
+
+        if confidence < min_conf:
+            original = result.get("highest_severity", "controlled")
+            if original == "safe":
+                result["highest_severity"] = "controlled"
+                print(f"[INFO] Confiança {confidence:.2f} < {min_conf} → promovido de safe para controlled")
+
+        severity = result.get("highest_severity", "none")
+
+        # ------------------------------------------------------------------
+        # Monta texto da mensagem do Slack
+        # ------------------------------------------------------------------
+        severity_meta = {
+            "safe":       ("🟢", "Safe Change"),
+            "controlled": ("🟡", "Mudança Controlada"),
+            "breaking":   ("🔴", "Breaking Change"),
+            "none":       ("⚪", "Sem alteração de banco"),
+        }
+        emoji, label = severity_meta.get(severity, ("⚪", severity))
+
+        items = result.get("items", [])
+        reasons = [i["reason"] for i in items if i.get("reason") and i.get("severity") != "none"]
+        description = "\n• ".join(reasons) if reasons else "Alteração de banco detectada."
+        if reasons:
+            description = "• " + description
+
+        pr_url    = os.environ.get("PR_URL", "")
+        pr_title  = os.environ.get("PR_TITLE", "")
+        pr_number = os.environ.get("PR_NUMBER", "")
+        pr_author = os.environ.get("PR_AUTHOR", "")
+
+        slack_text = (
+            f"{emoji} *{label}* detectada em migração de banco\n"
+            f"*PR:* <{pr_url}|#{pr_number} — {pr_title}> por @{pr_author}\n"
+            f"{description}\n"
+            f"<{pr_url}|Ver PR para detalhes>"
+        )
+
+        result["slack_text"] = slack_text
+        result["pr_url"]     = pr_url
+
+        # ------------------------------------------------------------------
+        # Grava outputs do GitHub Actions
+        # ------------------------------------------------------------------
+        gh_output = os.environ.get("GITHUB_OUTPUT", "")
+        if gh_output:
+            with open(gh_output, "a", encoding="utf-8") as fh:
+                def write(key: str, value: str) -> None:
+                    if "\n" in value:
+                        delim = "MIGRATION_DETECTOR_EOF"
+                        fh.write(f"{key}<<{delim}\n{value}\n{delim}\n")
+                    else:
+                        fh.write(f"{key}={value}\n")
+
+                write("has_db_change",    str(result.get("has_db_change", False)).lower())
+                write("highest_severity", result.get("highest_severity", "none"))
+                write("confidence",       str(confidence))
+                write("slack_text",       slack_text)
+                write("analysis_json",    json.dumps(result, ensure_ascii=False))
+
+    # -------------------------------------------------------------------------
+    # 4. Define outputs para o caminho sem arquivos de migração
+    # -------------------------------------------------------------------------
+    - name: Outputs | No migration files found
+      id: no-change
+      if: steps.collect.outputs.has_files == 'false'
+      shell: bash
+      run: |
+        echo "has_db_change=false"   >> "$GITHUB_OUTPUT"
+        echo "highest_severity=none" >> "$GITHUB_OUTPUT"
+        echo "confidence=1.0"        >> "$GITHUB_OUTPUT"
+        echo "slack_text="           >> "$GITHUB_OUTPUT"
+
+    # -------------------------------------------------------------------------
+    # 5. Consolida outputs em um único step referenciado pelos outputs da action
+    # -------------------------------------------------------------------------
+    - name: Outputs | Consolidate
+      id: set-outputs
+      shell: bash
+      env:
+        HAS_DB_CHANGE:    ${{ steps.analyze.outputs.has_db_change || steps.no-change.outputs.has_db_change }}
+        HIGHEST_SEVERITY: ${{ steps.analyze.outputs.highest_severity || steps.no-change.outputs.highest_severity }}
+        CONFIDENCE:       ${{ steps.analyze.outputs.confidence || steps.no-change.outputs.confidence }}
+      run: |
+        echo "has_db_change=${HAS_DB_CHANGE:-false}"      >> "$GITHUB_OUTPUT"
+        echo "highest_severity=${HIGHEST_SEVERITY:-none}" >> "$GITHUB_OUTPUT"
+        echo "confidence=${CONFIDENCE:-1.0}"              >> "$GITHUB_OUTPUT"
+
+    # -------------------------------------------------------------------------
+    # 6. Posta notificação no Slack
+    # -------------------------------------------------------------------------
+    - name: Notify | Post to Slack
+      id: slack
+      if: steps.collect.outputs.has_files == 'true' && steps.analyze.outputs.has_db_change == 'true'
+      shell: bash
+      env:
+        SLACK_WEBHOOK_URL: ${{ inputs.slack_webhook_url }}
+        SLACK_CHANNEL:     ${{ inputs.slack_channel }}
+        SLACK_TEXT:        ${{ steps.analyze.outputs.slack_text }}
+        HIGHEST_SEVERITY:  ${{ steps.analyze.outputs.highest_severity }}
+      run: |
+        # Usa Python para montar o JSON corretamente e evitar problemas de escaping
+        PAYLOAD=$(python3 - <<'PYEOF'
+        import os, json
+
+        text     = os.environ.get("SLACK_TEXT", "")
+        channel  = os.environ.get("SLACK_CHANNEL", "").strip()
+        severity = os.environ.get("HIGHEST_SEVERITY", "none")
+
+        color_map = {"safe": "good", "controlled": "warning", "breaking": "danger"}
+        color = color_map.get(severity, "#cccccc")
+
+        payload = {
+            "username":   "Migration Detector",
+            "icon_emoji": ":floppy_disk:",
+            "attachments": [
+                {
+                    "color":       color,
+                    "text":        text,
+                    "mrkdwn_in":   ["text"],
+                    "footer":      "Migration Detector · iclinic/automations",
+                    "footer_icon": "https://github.githubassets.com/favicons/favicon.png",
+                }
+            ],
+        }
+
+        if channel:
+            payload["channel"] = channel
+
+        print(json.dumps(payload))
+        PYEOF
+        )
+
+        HTTP_STATUS=$(curl -s \
+          -o /tmp/slack_resp.json \
+          -w "%{http_code}" \
+          -X POST \
+          -H "Content-Type: application/json" \
+          --data "$PAYLOAD" \
+          "$SLACK_WEBHOOK_URL")
+
+        echo "==> Slack HTTP status: $HTTP_STATUS"
+
+        if [[ "$HTTP_STATUS" != "200" ]]; then
+          echo "[WARN] Falha ao postar no Slack (status $HTTP_STATUS):"
+          cat /tmp/slack_resp.json || true
+        fi
+
+        TS=$(python3 -c \
+          "import sys,json; d=json.load(open('/tmp/slack_resp.json')); print(d.get('ts',''))" \
+          2>/dev/null || echo "")
+        echo "slack_message_ts=${TS}" >> "$GITHUB_OUTPUT"
+
+    # -------------------------------------------------------------------------
+    # 7. Falha o job se Breaking Change e fail_on_breaking == true
+    # -------------------------------------------------------------------------
+    - name: Gate | Fail on Breaking Change
+      if: steps.set-outputs.outputs.highest_severity == 'breaking' && inputs.fail_on_breaking == 'true'
+      shell: bash
+      run: |
+        echo "::error::🔴 Breaking Change detectada em migração de banco de dados."
+        echo "::error::Revisão obrigatória pelo time de dados antes do merge."
+        exit 1
