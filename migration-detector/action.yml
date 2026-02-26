@@ -231,7 +231,7 @@ runs:
         PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         REPO: ${{ github.repository }}
       run: |
-        python classify.py
+        python "$GITHUB_ACTION_PATH/classify.py"
 
     # -------------------------------------------------------------------------
     # 4. Define outputs para o caminho sem arquivos de migração
