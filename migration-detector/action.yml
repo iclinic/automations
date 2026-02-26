@@ -52,12 +52,6 @@ inputs:
     description: >
       Nome lógico do canal Slack (ex.: #data-impact-alerts). Usado para log e, quando
       compatível com a configuração do webhook, para roteamento da mensagem.
-  fail_on_breaking:
-    required: false
-    default: 'false'
-    description: >
-      Quando `true`, falha o job se a severidade máxima detectada for `breaking`.
-      Útil para bloquear o merge automaticamente via branch protection.
   minimum_confidence:
     required: false
     default: '0.70'
@@ -94,12 +88,21 @@ runs:
         HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         MIGRATION_PATHS: ${{ inputs.migration_paths }}
         IGNORE_TERMS: ${{ inputs.ignore_name_contains }}
+        SLACK_WEBHOOK_URL: ${{ inputs.slack_webhook_url }}
       run: |
+        if [[ -z "$SLACK_WEBHOOK_URL" ]]; then
+          echo "[WARN] SLACK_WEBHOOK_URL não configurada — notificação ignorada."
+          echo "slack_message_ts=" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
         echo "==> Coletando arquivos alterados entre $BASE_SHA e $HEAD_SHA"
 
-        CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" 2>/dev/null \
-          || git diff --name-only HEAD~1 HEAD 2>/dev/null \
-          || echo "")
+        CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+        if [[ $? -ne 0 ]]; then
+          echo "::error::Não foi possível calcular diff entre BASE_SHA e HEAD_SHA"
+          exit 1
+        fi
 
         if [[ -z "$CHANGED" ]]; then
           echo "Nenhum arquivo alterado encontrado."
@@ -177,11 +180,12 @@ runs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.12'
+        cache: 'pip'
 
     - name: Setup | Install openai SDK
       if: steps.collect.outputs.has_files == 'true'
       shell: bash
-      run: pip install openai --quiet --disable-pip-version-check
+      run: pip install -r requirements.txt --quiet --disable-pip-version-check
 
     # -------------------------------------------------------------------------
     # 3. Classifica as migrações com IA e gera o texto para o Slack
@@ -196,7 +200,7 @@ runs:
     - name: Analyze | Classify migrations with AI
       id: analyze
       if: steps.collect.outputs.has_files == 'true'
-      shell: python
+      shell: bash
       env:
         MIGRATION_FILES: ${{ steps.collect.outputs.migration_files }}
         AI_API_URL: ${{ inputs.ai_api_url }}
@@ -210,196 +214,7 @@ runs:
         PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         REPO: ${{ github.repository }}
       run: |
-        import os
-        import json
-        import sys
-
-        from openai import OpenAI
-
-        # ------------------------------------------------------------------
-        # Resolve credenciais de IA
-        # ------------------------------------------------------------------
-        ai_api_key   = os.environ.get("AI_API_KEY", "").strip()
-        github_token = os.environ.get("GITHUB_TOKEN", "").strip()
-        api_key = ai_api_key if ai_api_key else github_token
-        api_url = os.environ["AI_API_URL"]
-        model   = os.environ["AI_MODEL"]
-
-        using_github_models = not bool(ai_api_key)
-        print(f"==> Provedor de IA: {'GitHub Models API' if using_github_models else 'Hub externo'}")
-        print(f"==> URL: {api_url}  |  Modelo: {model}")
-
-        client = OpenAI(base_url=api_url, api_key=api_key)
-
-        # ------------------------------------------------------------------
-        # Lê os arquivos de migração
-        # ------------------------------------------------------------------
-        files_raw = os.environ.get("MIGRATION_FILES", "")
-        files = [f.strip() for f in files_raw.split("|") if f.strip()]
-
-        file_contents: dict = {}
-        for path in files:
-            try:
-                with open(path, "r", encoding="utf-8", errors="replace") as fh:
-                    content = fh.read(6000)  # 6 KB por arquivo para não exceder contexto
-                file_contents[path] = content
-                print(f"  [OK] {path} ({len(content)} chars)")
-            except Exception as exc:
-                file_contents[path] = f"[Erro ao ler arquivo: {exc}]"
-                print(f"  [WARN] {path}: {exc}", file=sys.stderr)
-
-        context_block = "\n\n".join(
-            f"=== {p} ===\n{c}" for p, c in file_contents.items()
-        )
-
-        # ------------------------------------------------------------------
-        # Prompt de sistema com os critérios de classificação
-        # ------------------------------------------------------------------
-        SYSTEM_PROMPT = """Você é um analista especialista em migrações de banco de dados.
-        Analise os arquivos de migração fornecidos e classifique cada um de acordo com os critérios abaixo.
-
-        Critérios de classificação:
-        - safe (Safe Change): adição de coluna opcional, nova tabela não consumida, novo valor enum com fallback, novo índice, campo novo na camada analítica.
-        - controlled (Mudança Controlada): alterar tamanho de varchar, alterar precisão numérica, tornar campo nullable, alterar valor default.
-        - breaking (Breaking Change): remover campo, renomear campo, alterar tipo de dado, alterar chave primária, remover tabela consumida.
-
-        Regras:
-        1. Inclua TODOS os arquivos fornecidos no array "items", exatamente um objeto por arquivo — mesmo que a classificação seja "none".
-        2. Se o arquivo não contiver nenhuma mudança de banco de dados, classifique como "none".
-        3. Prefira a classificação mais conservadora quando houver dúvida.
-        4. O campo "reason" deve ser uma frase curta em português descrevendo objetivamente a mudança.
-        5. O campo "confidence" deve refletir sua certeza (0.0 a 1.0).
-        6. O campo "highest_severity" deve refletir a severidade máxima entre todos os arquivos.
-
-        Responda SOMENTE com JSON válido neste formato exato, sem nenhum texto extra ou bloco de código markdown:
-        {
-          "has_db_change": true,
-          "highest_severity": "breaking",
-          "confidence": 0.95,
-          "items": [
-            {
-              "file": "caminho/arquivo.py",
-              "severity": "breaking",
-              "reason": "Remoção do campo qty na tabela orders"
-            }
-          ]
-        }"""
-
-        USER_PROMPT = (
-            f"Analise as seguintes migrações de banco de dados:\n\n"
-            f"{context_block}\n\n"
-            f"PR #{os.environ.get('PR_NUMBER')} — {os.environ.get('PR_TITLE')}\n"
-            f"Repositório: {os.environ.get('REPO')}\n\n"
-            f"Retorne SOMENTE o JSON solicitado."
-        )
-
-        # ------------------------------------------------------------------
-        # Chama a IA
-        # ------------------------------------------------------------------
-        try:
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user",   "content": USER_PROMPT},
-                ],
-                temperature=0.1,
-                max_tokens=1200,
-            )
-            raw = response.choices[0].message.content.strip()
-
-            # Remove bloco de código markdown se o modelo embrulhar a resposta
-            if raw.startswith("```"):
-                parts = raw.split("```")
-                raw = parts[1] if len(parts) >= 2 else raw
-                if raw.startswith("json"):
-                    raw = raw[4:].strip()
-
-            result = json.loads(raw)
-            print(f"==> Resposta da IA:\n{json.dumps(result, ensure_ascii=False, indent=2)}")
-
-        except Exception as exc:
-            print(f"[ERRO] Falha na análise com IA: {exc}", file=sys.stderr)
-            # Fallback conservador: marca como controlled para revisão manual
-            result = {
-                "has_db_change": True,
-                "highest_severity": "controlled",
-                "confidence": 0.0,
-                "items": [
-                    {
-                        "file": f,
-                        "severity": "controlled",
-                        "reason": "Análise automática falhou — revisão manual necessária",
-                    }
-                    for f in files
-                ],
-            }
-
-        # ------------------------------------------------------------------
-        # Eleva severidade se confiança abaixo do limiar
-        # ------------------------------------------------------------------
-        min_conf   = float(os.environ.get("MINIMUM_CONFIDENCE", "0.70"))
-        confidence = float(result.get("confidence", 1.0))
-
-        if confidence < min_conf:
-            original = result.get("highest_severity", "controlled")
-            if original == "safe":
-                result["highest_severity"] = "controlled"
-                print(f"[INFO] Confiança {confidence:.2f} < {min_conf} → promovido de safe para controlled")
-
-        severity = result.get("highest_severity", "none")
-
-        # ------------------------------------------------------------------
-        # Monta texto da mensagem do Slack
-        # ------------------------------------------------------------------
-        severity_meta = {
-            "safe":       ("🟢", "Safe Change"),
-            "controlled": ("🟡", "Mudança Controlada"),
-            "breaking":   ("🔴", "Breaking Change"),
-            "none":       ("⚪", "Sem alteração de banco"),
-        }
-        emoji, label = severity_meta.get(severity, ("⚪", severity))
-
-        # Suporte a ambas as chaves: "items" (correto) e "MO" (resposta legada do modelo)
-        items = result.get("items") or result.get("MO") or []
-        reasons = [i["reason"] for i in items if i.get("reason") and i.get("severity") != "none"]
-        description = "\n• ".join(reasons) if reasons else "Alteração de banco detectada."
-        if reasons:
-            description = "• " + description
-
-        pr_url    = os.environ.get("PR_URL", "")
-        pr_title  = os.environ.get("PR_TITLE", "")
-        pr_number = os.environ.get("PR_NUMBER", "")
-        pr_author = os.environ.get("PR_AUTHOR", "")
-
-        slack_text = (
-            f"{emoji} *{label}* detectada em migração de banco\n"
-            f"*PR:* <{pr_url}|#{pr_number} — {pr_title}> por @{pr_author}\n"
-            f"{description}\n"
-            f"<{pr_url}|Ver PR para detalhes>"
-        )
-
-        result["slack_text"] = slack_text
-        result["pr_url"]     = pr_url
-
-        # ------------------------------------------------------------------
-        # Grava outputs do GitHub Actions
-        # ------------------------------------------------------------------
-        gh_output = os.environ.get("GITHUB_OUTPUT", "")
-        if gh_output:
-            with open(gh_output, "a", encoding="utf-8") as fh:
-                def write(key: str, value: str) -> None:
-                    if "\n" in value:
-                        delim = "MIGRATION_DETECTOR_EOF"
-                        fh.write(f"{key}<<{delim}\n{value}\n{delim}\n")
-                    else:
-                        fh.write(f"{key}={value}\n")
-
-                write("has_db_change",    str(result.get("has_db_change", False)).lower())
-                write("highest_severity", result.get("highest_severity", "none"))
-                write("confidence",       str(confidence))
-                write("slack_text",       slack_text)
-                write("analysis_json",    json.dumps(result, ensure_ascii=False))
+        python classify.py
 
     # -------------------------------------------------------------------------
     # 4. Define outputs para o caminho sem arquivos de migração
@@ -443,42 +258,7 @@ runs:
         HIGHEST_SEVERITY:  ${{ steps.analyze.outputs.highest_severity }}
       run: |
         # Usa Python para montar o JSON corretamente e evitar problemas de escaping
-        PAYLOAD=$(python3 - <<'PYEOF'
-        import os, json
-
-        text     = os.environ.get("SLACK_TEXT", "")
-        channel  = os.environ.get("SLACK_CHANNEL", "").strip()
-        severity = os.environ.get("HIGHEST_SEVERITY", "none")
-
-        color_map = {"safe": "good", "controlled": "warning", "breaking": "danger"}
-        color = color_map.get(severity, "#cccccc")
-
-        payload = {
-            "username":   "Migration Detector",
-            "icon_emoji": ":floppy_disk:",
-            "attachments": [
-                {
-                    "color":       color,
-                    "text":        text,
-                    "mrkdwn_in":   ["text"],
-                    "footer":      "Migration Detector · iclinic/automations",
-                    "footer_icon": "https://github.githubassets.com/favicons/favicon.png",
-                }
-            ],
-        }
-
-        if channel:
-            payload["channel"] = channel
-
-        print(json.dumps(payload))
-        PYEOF
-        )
-
-        if [[ -z "$SLACK_WEBHOOK_URL" ]]; then
-          echo "[WARN] SLACK_WEBHOOK_URL não configurada — notificação ignorada."
-          echo "slack_message_ts=" >> "$GITHUB_OUTPUT"
-          exit 0
-        fi
+        PAYLOAD=$(python3 "$GITHUB_ACTION_PATH/build_slack_payload.py")
 
         echo "{}" > /tmp/slack_resp.json
 

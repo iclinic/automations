@@ -73,7 +73,6 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           slack_webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
           slack_channel: "#data-impact-alerts"
-          fail_on_breaking: "true"
 ```
 
 **2.3** Se o repositório usa **hub externo de IA** em vez da GitHub Models API, adicione os três inputs abaixo ao step:
@@ -173,7 +172,6 @@ Remoção de alguma coluna ou tabela:
 - `ignore_name_contains` (opcional, default `dump`): termos para ignorar no nome do arquivo.
 - `slack_webhook_url` (obrigatório): webhook para envio da mensagem ao canal Slack.
 - `slack_channel` (opcional): nome lógico do canal para exibir no payload/log.
-- `fail_on_breaking` (opcional, default `true`): falha o job em `Breaking Change`.
 - `minimum_confidence` (opcional, default `0.70`): limiar mínimo de confiança da IA. Abaixo desse valor, a classificação é promovida para `controlled`.
 
 ### Outputs sugeridos
