@@ -6,9 +6,10 @@ DEFAULT_COLOR = "#cccccc"
 
 
 def build_payload(text: str, channel: str, severity: str) -> dict:
-    payload = {
+    return {
         "username": "Migration Detector",
         "icon_emoji": ":floppy_disk:",
+        **({"channel": channel} if channel else {}),
         "attachments": [
             {
                 "color": COLOR_MAP.get(severity, DEFAULT_COLOR),
@@ -19,11 +20,6 @@ def build_payload(text: str, channel: str, severity: str) -> dict:
             }
         ],
     }
-
-    if channel:
-        payload["channel"] = channel
-
-    return payload
 
 
 def main() -> None:

@@ -273,13 +273,14 @@ class TestBuildSlackText:
         assert "Sem mudança" not in text
         assert "Alteração de banco detectada." in text
 
-    def test_supports_legacy_mo_key(self):
+    def test_mo_key_no_longer_supported(self):
         result = {
             "highest_severity": "controlled",
             "MO": [{"severity": "controlled", "reason": "Nullable adicionado"}],
         }
         text = build_slack_text(result, "http://pr", "Title", "1", "author")
-        assert "Nullable adicionado" in text
+        assert "Nullable adicionado" not in text
+        assert "Alteração de banco detectada." in text
 
     def test_empty_items_uses_default_description(self):
         result = {"highest_severity": "controlled", "items": []}

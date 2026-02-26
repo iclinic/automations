@@ -88,9 +88,10 @@ runs:
         HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         MIGRATION_PATHS: ${{ inputs.migration_paths }}
         IGNORE_TERMS: ${{ inputs.ignore_name_contains }}
-        SLACK_WEBHOOK_URL: ${{ inputs.slack_webhook_url }}
+        HAS_SLACK_WEBHOOK: ${{ inputs.slack_webhook_url != '' }}
       run: |
-        if [[ -z "$SLACK_WEBHOOK_URL" ]]; then
+        set -euo pipefail
+        if [[ "$HAS_SLACK_WEBHOOK" != "true" ]]; then
           echo "[WARN] SLACK_WEBHOOK_URL não configurada — notificação ignorada."
           echo "slack_message_ts=" >> "$GITHUB_OUTPUT"
           exit 0
@@ -98,8 +99,7 @@ runs:
 
         echo "==> Coletando arquivos alterados entre $BASE_SHA e $HEAD_SHA"
 
-        CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
-        if [[ $? -ne 0 ]]; then
+        if ! CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA"); then
           echo "::error::Não foi possível calcular diff entre BASE_SHA e HEAD_SHA"
           exit 1
         fi
@@ -126,6 +126,7 @@ runs:
           #   3. Converte * simples               (* -> [^/]*)
           #   4. Restaura placeholder como .*     (DSTAR -> .*)
           # Sem placeholder, o passo 3 corromperia o .* gerado no passo 2.
+          # NOTE: fragile glob-to-regex — only handles *, **, and literal dots; may break on globs with ?, [], or braces
           regex=$(echo "$pattern" \
             | sed 's|\.|\\.|g' \
             | sed 's|\*\*|DSTAR|g' \
@@ -152,7 +153,7 @@ runs:
           IFS=',' read -ra IGNORE_LIST <<< "$IGNORE_TERMS"
           for term in "${IGNORE_LIST[@]}"; do
             term=$(echo "$term" | xargs)
-            FINAL=$(echo "$FINAL" | grep -Eiv "$term" || true)
+            FINAL=$(echo "$FINAL" | grep -Fiv "$term" || true)
           done
         fi
 
@@ -190,6 +191,7 @@ runs:
       id: req-hash
       shell: bash
       run: |
+        set -euo pipefail
         echo "hash=$(sha256sum "$GITHUB_ACTION_PATH/requirements.txt" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
     - name: Setup | Cache pip
@@ -231,6 +233,7 @@ runs:
         PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         REPO: ${{ github.repository }}
       run: |
+        set -euo pipefail
         python "$GITHUB_ACTION_PATH/classify.py"
 
     # -------------------------------------------------------------------------
@@ -241,6 +244,7 @@ runs:
       if: steps.collect.outputs.has_files == 'false'
       shell: bash
       run: |
+        set -euo pipefail
         echo "has_db_change=false"   >> "$GITHUB_OUTPUT"
         echo "highest_severity=none" >> "$GITHUB_OUTPUT"
         echo "confidence=1.0"        >> "$GITHUB_OUTPUT"
@@ -257,6 +261,7 @@ runs:
         HIGHEST_SEVERITY: ${{ steps.analyze.outputs.highest_severity || steps.no-change.outputs.highest_severity }}
         CONFIDENCE:       ${{ steps.analyze.outputs.confidence || steps.no-change.outputs.confidence }}
       run: |
+        set -euo pipefail
         echo "has_db_change=${HAS_DB_CHANGE:-false}"      >> "$GITHUB_OUTPUT"
         echo "highest_severity=${HIGHEST_SEVERITY:-none}" >> "$GITHUB_OUTPUT"
         echo "confidence=${CONFIDENCE:-1.0}"              >> "$GITHUB_OUTPUT"
@@ -274,18 +279,18 @@ runs:
         SLACK_TEXT:        ${{ steps.analyze.outputs.slack_text }}
         HIGHEST_SEVERITY:  ${{ steps.analyze.outputs.highest_severity }}
       run: |
+        set -euo pipefail
         # Usa Python para montar o JSON corretamente e evitar problemas de escaping
-        PAYLOAD=$(python3 "$GITHUB_ACTION_PATH/build_slack_payload.py")
-
         echo "{}" > /tmp/slack_resp.json
 
-        HTTP_STATUS=$(curl -s \
-          -o /tmp/slack_resp.json \
-          -w "%{http_code}" \
-          -X POST \
-          -H "Content-Type: application/json" \
-          --data "$PAYLOAD" \
-          "$SLACK_WEBHOOK_URL") || true
+        HTTP_STATUS=$(python3 "$GITHUB_ACTION_PATH/build_slack_payload.py" \
+          | curl -s \
+            -o /tmp/slack_resp.json \
+            -w "%{http_code}" \
+            -X POST \
+            -H "Content-Type: application/json" \
+            --data @- \
+            "$SLACK_WEBHOOK_URL") || true
 
         echo "==> Slack HTTP status: $HTTP_STATUS"
 
@@ -306,5 +311,6 @@ runs:
       if: steps.set-outputs.outputs.highest_severity == 'breaking'
       shell: bash
       run: |
+        set -euo pipefail
         echo "::warning::🔴 Breaking Change detectada em migração de banco de dados."
         echo "::warning::Aguarde revisão do time de dados antes do merge."

@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import time
 
 from openai import OpenAI
 
@@ -72,6 +73,10 @@ def read_migration_files(files: list[str]) -> dict[str, str]:
         try:
             with open(path, "r", encoding="utf-8", errors="replace") as fh:
                 content = fh.read(MAX_FILE_BYTES)
+                if len(content) == MAX_FILE_BYTES:
+                    remaining = fh.read(1)
+                    if remaining:
+                        print(f"  [WARN] {path} truncado em {MAX_FILE_BYTES} bytes", file=sys.stderr)
             contents[path] = content
             print(f"  [OK] {path} ({len(content)} chars)")
         except Exception as exc:
@@ -179,8 +184,7 @@ def build_slack_text(
     severity = result.get("highest_severity", "none")
     emoji, label = SEVERITY_META.get(severity, ("⚪", severity))
 
-    # Suporte a ambas as chaves: "items" (correto) e "MO" (resposta legada do modelo)
-    items = result.get("items") or result.get("MO") or []
+    items = result.get("items") or []
     reasons = [
         i["reason"] for i in items if i.get("reason") and i.get("severity") != "none"
     ]
@@ -231,8 +235,13 @@ def write_github_outputs(
 def main() -> None:
     ai_api_key   = os.environ.get("AI_API_KEY", "").strip()
     github_token = os.environ.get("GITHUB_TOKEN", "").strip()
-    api_url      = os.environ["AI_API_URL"]
-    model        = os.environ["AI_MODEL"]
+    api_url = os.environ.get("AI_API_URL", "").strip()
+    model   = os.environ.get("AI_MODEL", "").strip()
+
+    if not api_url:
+        raise SystemExit("[ERRO] AI_API_URL nao configurada.")
+    if not model:
+        raise SystemExit("[ERRO] AI_MODEL nao configurado.")
 
     api_key, using_github_models = resolve_credentials(ai_api_key, github_token)
     print(f"==> Provedor de IA: {'GitHub Models API' if using_github_models else 'Hub externo'}")
@@ -253,13 +262,20 @@ def main() -> None:
         repo=os.environ.get("REPO", ""),
     )
 
-    try:
-        raw    = call_ai(client, model, user_prompt)
-        result = parse_ai_response(raw)
-        print(f"==> Resposta da IA:\n{json.dumps(result, ensure_ascii=False, indent=2)}")
-    except Exception as exc:
-        print(f"[ERRO] Falha na análise com IA: {exc}", file=sys.stderr)
-        result = make_fallback_result(files)
+    MAX_RETRIES = 2
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            raw = call_ai(client, model, user_prompt)
+            result = parse_ai_response(raw)
+            print(f"==> Resposta da IA:\n{json.dumps(result, ensure_ascii=False, indent=2)}")
+            break
+        except Exception as exc:
+            if attempt < MAX_RETRIES:
+                print(f"[WARN] Tentativa {attempt + 1} falhou: {exc}. Retentando...")
+                time.sleep(2)
+            else:
+                print(f"[ERRO] Falha na análise com IA: {exc}", file=sys.stderr)
+                result = make_fallback_result(files)
 
     min_conf   = float(os.environ.get("MINIMUM_CONFIDENCE", "0.70"))
     result     = apply_confidence_threshold(result, min_conf)
@@ -270,9 +286,8 @@ def main() -> None:
     pr_number = os.environ.get("PR_NUMBER", "")
     pr_author = os.environ.get("PR_AUTHOR", "")
 
-    slack_text       = build_slack_text(result, pr_url, pr_title, pr_number, pr_author)
-    result["slack_text"] = slack_text
-    result["pr_url"]     = pr_url
+    slack_text = build_slack_text(result, pr_url, pr_title, pr_number, pr_author)
+    result = {**result, "slack_text": slack_text, "pr_url": pr_url}
 
     gh_output = os.environ.get("GITHUB_OUTPUT", "")
     if gh_output:

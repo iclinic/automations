@@ -12,7 +12,8 @@ from build_slack_payload import (
 # Helpers
 # ---------------------------------------------------------------------------
 
-ATTACHMENT = lambda payload: payload["attachments"][0]
+def ATTACHMENT(payload):
+    return payload["attachments"][0]
 
 
 # ---------------------------------------------------------------------------
