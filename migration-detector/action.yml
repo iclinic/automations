@@ -180,8 +180,24 @@ runs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.12'
-        cache: 'pip'
-        cache-dependency-path: ${{ github.action_path }}/requirements.txt
+
+    # hashFiles() só resolve globs dentro de $GITHUB_WORKSPACE (workspace do
+    # repositório consumidor), portanto não pode referenciar o diretório da
+    # action diretamente. Calculamos o hash via shell, onde $GITHUB_ACTION_PATH
+    # é resolvido corretamente como variável de ambiente de runtime.
+    - name: Setup | Compute requirements hash
+      if: steps.collect.outputs.has_files == 'true'
+      id: req-hash
+      shell: bash
+      run: |
+        echo "hash=$(sha256sum "$GITHUB_ACTION_PATH/requirements.txt" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+    - name: Setup | Cache pip
+      if: steps.collect.outputs.has_files == 'true'
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: migration-detector-pip-${{ steps.req-hash.outputs.hash }}
 
     - name: Setup | Install openai SDK
       if: steps.collect.outputs.has_files == 'true'
