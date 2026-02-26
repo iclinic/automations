@@ -181,11 +181,12 @@ runs:
       with:
         python-version: '3.12'
         cache: 'pip'
+        cache-dependency-path: ${{ github.action_path }}/requirements.txt
 
     - name: Setup | Install openai SDK
       if: steps.collect.outputs.has_files == 'true'
       shell: bash
-      run: pip install -r requirements.txt --quiet --disable-pip-version-check
+      run: pip install -r "$GITHUB_ACTION_PATH/requirements.txt" --quiet --disable-pip-version-check
 
     # -------------------------------------------------------------------------
     # 3. Classifica as migrações com IA e gera o texto para o Slack
