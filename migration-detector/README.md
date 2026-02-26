@@ -32,8 +32,6 @@ Verifique (ou crie) cada secret em `https://github.com/organizations/iclinic/set
 | Secret | Descrição | Obrigatório |
 |---|---|---|
 | `SLACK_WEBHOOK_URL` | Incoming Webhook do canal de alertas do time de dados. Crie em [api.slack.com/apps](https://api.slack.com/apps) | Sempre |
-| `AI_HUB_URL` | URL base do hub externo de IA (ex.: `https://ia.suaempresa.com/v1`) | Apenas se **não** usar GitHub Models |
-| `AI_HUB_API_KEY` | Chave de API do hub externo de IA | Apenas se **não** usar GitHub Models |
 
 > **Nota sobre GitHub Models:** a action usa a GitHub Models API por padrão (`https://models.inference.ai.azure.com`) sem precisar de secret extra. Para isso, a organização precisa ter o **GitHub Copilot Business ou Enterprise** habilitado. Verifique em `Settings > Copilot > Policies > Allow GitHub Models`.
 
@@ -75,21 +73,13 @@ jobs:
           slack_channel: "#data-impact-alerts"
 ```
 
-**2.3** Se o repositório usa **hub externo de IA** em vez da GitHub Models API, adicione os três inputs abaixo ao step:
-
-```yml
-          ai_api_url: ${{ secrets.AI_HUB_URL }}
-          ai_api_key: ${{ secrets.AI_HUB_API_KEY }}
-          ai_model: nome-do-modelo-no-hub
-```
-
-**2.4 (Opcional — recomendado para Breaking Change)** Configure uma **branch protection rule** na branch principal para exigir que o job `migration-detector` passe antes do merge:
+**2.3 (Opcional — recomendado para Breaking Change)** Configure uma **branch protection rule** na branch principal para exigir que o job `migration-detector` passe antes do merge:
 
 1. Acesse `Settings > Branches > Add rule` no repositório.
 2. Em **Require status checks to pass before merging**, adicione `migration-detector`.
 3. Isso garante que um `🔴 Breaking Change` bloqueie o merge automaticamente.
 
-**2.5 (Opcional)** Se o projeto tiver um padrão diferente de estrutura de migrações, sobrescreva os globs padrão:
+**2.4 (Opcional)** Se o projeto tiver um padrão diferente de estrutura de migrações, sobrescreva os globs padrão:
 
 ```yml
           migration_paths: "**/db/migrate/*.rb,**/*.sql,**/migrations/*.py"
@@ -188,7 +178,6 @@ A action suporta dois provedores de IA intercambiáveis via protocolo OpenAI-com
 | Provedor | Quando ativa | Secret necessário |
 |---|---|---|
 | **GitHub Models API** (padrão) | `ai_api_key` vazio | Apenas `GITHUB_TOKEN` |
-| **Hub externo** | `ai_api_key` fornecido | `AI_HUB_API_KEY` + `AI_HUB_URL` |
 
 A GitHub Models API (`https://models.inference.ai.azure.com`) é o caminho preferencial: não exige secret adicional, usa o `GITHUB_TOKEN` já disponível em qualquer workflow, e requer apenas a permissão `models: read`.
 
