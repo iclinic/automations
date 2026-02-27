@@ -1,9 +1,9 @@
 import json
 import os
-import sys
 import time
 
 from openai import OpenAI
+from gha_logger import get_logger
 
 # ------------------------------------------------------------------
 # Constantes
@@ -48,6 +48,8 @@ SEVERITY_META: dict[str, tuple[str, str]] = {
 
 MAX_FILE_BYTES = 6000
 
+logger = get_logger(__name__)
+
 
 # ------------------------------------------------------------------
 # Credenciais
@@ -76,12 +78,12 @@ def read_migration_files(files: list[str]) -> dict[str, str]:
                 if len(content) == MAX_FILE_BYTES:
                     remaining = fh.read(1)
                     if remaining:
-                        print(f"  [WARN] {path} truncado em {MAX_FILE_BYTES} bytes", file=sys.stderr)
+                        logger.warning(f"  [WARN] {path} truncado em {MAX_FILE_BYTES} bytes")
             contents[path] = content
-            print(f"  [OK] {path} ({len(content)} chars)")
+            logger.info(f"  [OK] {path} ({len(content)} chars)")
         except Exception as exc:
             contents[path] = f"[Erro ao ler arquivo: {exc}]"
-            print(f"  [WARN] {path}: {exc}", file=sys.stderr)
+            logger.warning(f"  [WARN] {path}: {exc}")
     return contents
 
 
@@ -167,7 +169,7 @@ def apply_confidence_threshold(result: dict, min_conf: float) -> dict:
     confidence = float(result.get("confidence", 1.0))
     if confidence < min_conf and result.get("highest_severity") == "safe":
         result = {**result, "highest_severity": "controlled"}
-        print(
+        logger.info(
             f"[INFO] Confiança {confidence:.2f} < {min_conf}"
             " → promovido de safe para controlled"
         )
@@ -244,8 +246,8 @@ def main() -> None:
         raise SystemExit("[ERRO] AI_MODEL nao configurado.")
 
     api_key, using_github_models = resolve_credentials(ai_api_key, github_token)
-    print(f"==> Provedor de IA: {'GitHub Models API' if using_github_models else 'Hub externo'}")
-    print(f"==> URL: {api_url}  |  Modelo: {model}")
+    logger.info(f"==> Provedor de IA: {'GitHub Models API' if using_github_models else 'Hub externo'}")
+    logger.info(f"==> URL: {api_url}  |  Modelo: {model}")
 
     client = OpenAI(base_url=api_url, api_key=api_key, timeout=30.0)
 
@@ -267,14 +269,14 @@ def main() -> None:
         try:
             raw = call_ai(client, model, user_prompt)
             result = parse_ai_response(raw)
-            print(f"==> Resposta da IA:\n{json.dumps(result, ensure_ascii=False, indent=2)}")
+            logger.info(f"==> Resposta da IA:\n{json.dumps(result, ensure_ascii=False, indent=2)}")
             break
         except Exception as exc:
             if attempt < MAX_RETRIES:
-                print(f"[WARN] Tentativa {attempt + 1} falhou: {exc}. Retentando...")
+                logger.warning(f"[WARN] Tentativa {attempt + 1} falhou: {exc}. Retentando...")
                 time.sleep(2)
             else:
-                print(f"[ERRO] Falha na análise com IA: {exc}", file=sys.stderr)
+                logger.error(f"[ERRO] Falha na análise com IA: {exc}")
                 result = make_fallback_result(files)
 
     min_conf   = float(os.environ.get("MINIMUM_CONFIDENCE", "0.70"))
