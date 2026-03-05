@@ -1,0 +1,316 @@
+name: 'Migration Detector'
+author: 'iclinic'
+description: >
+  Detecta arquivos de migração de banco de dados em PRs, classifica o impacto via IA
+  e notifica o time de dados em um canal do Slack.
+
+inputs:
+  github_token:
+    required: true
+    description: >
+      Token do GitHub. Usado para ler metadados do PR e, por padrão, como chave de autenticação
+      na GitHub Models API (models.inference.ai.azure.com). Requer permissão `models: read`
+      no workflow quando utilizado como chave de IA.
+  ai_api_url:
+    required: false
+    default: 'https://models.inference.ai.azure.com'
+    description: >
+      URL base da API de IA compatível com OpenAI. Padrão: GitHub Models API.
+      Para uso com hub externo, forneça a URL do serviço e preencha `ai_api_key`.
+  ai_api_key:
+    required: false
+    default: ''
+    description: >
+      Chave de API para o hub externo de IA. Quando vazio (padrão), a action usa o
+      `github_token` contra a GitHub Models API, sem necessidade de secret adicional.
+  ai_model:
+    required: false
+    default: 'gpt-4o-mini'
+    description: >
+      Nome do modelo de IA a utilizar. Padrão compatível com GitHub Models.
+      Ajuste conforme o modelo disponível no seu hub externo, se aplicável.
+  migration_paths:
+    required: false
+    default: '**/*.sql,**/migrations/*.py,**/alembic/versions/*.py,**/*AutoMigrate.ts,**/*automigrate.ts'
+    description: >
+      Globs separados por vírgula para identificar arquivos de migração. Cobre:
+      SQL puro, Django (migrations/*.py), Alembic/FastAPI (alembic/versions/*.py)
+      e TypeScript com AutoMigrate.
+  ignore_name_contains:
+    required: false
+    default: 'dump'
+    description: >
+      Termos (separados por vírgula, case-insensitive) presentes no nome do arquivo
+      que indicam que ele deve ser ignorado. Padrão: `dump` (arquivos de dump local).
+  slack_webhook_url:
+    required: true
+    description: >
+      Webhook do Slack para envio da notificação de impacto ao canal do time de dados.
+  slack_channel:
+    required: false
+    default: ''
+    description: >
+      Nome lógico do canal Slack (ex.: #data-impact-alerts). Usado para log e, quando
+      compatível com a configuração do webhook, para roteamento da mensagem.
+  minimum_confidence:
+    required: false
+    default: '0.70'
+    description: >
+      Limiar mínimo de confiança da IA (0 a 1). Abaixo desse valor, a classificação
+      é promovida para `controlled` por segurança, evitando falsos negativos silenciosos.
+
+outputs:
+  has_db_change:
+    description: '`true` se ao menos um arquivo de migração com mudança de banco for detectado.'
+    value: ${{ steps.set-outputs.outputs.has_db_change }}
+  highest_severity:
+    description: 'Severidade máxima encontrada: `safe`, `controlled`, `breaking` ou `none`.'
+    value: ${{ steps.set-outputs.outputs.highest_severity }}
+  confidence:
+    description: 'Confiança da classificação retornada pela IA (0 a 1).'
+    value: ${{ steps.set-outputs.outputs.confidence }}
+  slack_message_ts:
+    description: 'Timestamp da mensagem postada no Slack (disponível apenas com Incoming Webhooks v2+).'
+    value: ${{ steps.slack.outputs.slack_message_ts }}
+
+runs:
+  using: composite
+  steps:
+
+    # -------------------------------------------------------------------------
+    # 1. Coleta os arquivos de migração alterados no PR
+    # -------------------------------------------------------------------------
+    - name: Collect | Find changed migration files
+      id: collect
+      shell: bash
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        MIGRATION_PATHS: ${{ inputs.migration_paths }}
+        IGNORE_TERMS: ${{ inputs.ignore_name_contains }}
+        HAS_SLACK_WEBHOOK: ${{ inputs.slack_webhook_url != '' }}
+      run: |
+        set -euo pipefail
+        if [[ "$HAS_SLACK_WEBHOOK" != "true" ]]; then
+          echo "[WARN] SLACK_WEBHOOK_URL não configurada — notificação ignorada."
+          echo "slack_message_ts=" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        echo "==> Coletando arquivos alterados entre $BASE_SHA e $HEAD_SHA"
+
+        if ! CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA"); then
+          echo "::error::Não foi possível calcular diff entre BASE_SHA e HEAD_SHA"
+          exit 1
+        fi
+
+        if [[ -z "$CHANGED" ]]; then
+          echo "Nenhum arquivo alterado encontrado."
+          echo "has_files=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        echo "==> Todos os arquivos alterados no PR:"
+        echo "$CHANGED"
+
+        # Monta regex de inclusão a partir dos globs separados por vírgula
+        INCLUDE_REGEX=""
+
+        echo "MIGRATION_PATHS: $MIGRATION_PATHS"
+
+        IFS=',' read -ra PATTERNS <<< "$MIGRATION_PATHS"
+        for pattern in "${PATTERNS[@]}"; do
+          # Ordem importa:
+          #   1. Escapa pontos literais primeiro  (. -> \.)
+          #   2. Protege ** com placeholder       (** -> DSTAR)
+          #   3. Converte * simples               (* -> [^/]*)
+          #   4. Restaura placeholder como .*     (DSTAR -> .*)
+          # Sem placeholder, o passo 3 corromperia o .* gerado no passo 2.
+          # NOTE: fragile glob-to-regex — only handles *, **, and literal dots; may break on globs with ?, [], or braces
+          regex=$(echo "$pattern" \
+            | sed 's|\.|\\.|g' \
+            | sed 's|\*\*|DSTAR|g' \
+            | sed 's|\*|[^/]*|g' \
+            | sed 's|DSTAR|.*|g')
+          # Permite também match sem diretório (arquivo na raiz ou prefixo parcial)
+          regex_root=$(echo "$regex" | sed 's|^\.\*/||')
+          INCLUDE_REGEX="${INCLUDE_REGEX}${regex}|${regex_root}|"
+        done
+        INCLUDE_REGEX="${INCLUDE_REGEX%|}"
+        echo "==> INCLUDE_REGEX: $INCLUDE_REGEX"
+
+        FILTERED=$(echo "$CHANGED" | grep -E "$INCLUDE_REGEX" || true)
+
+        if [[ -z "$FILTERED" ]]; then
+          echo "Nenhum arquivo de migração encontrado após filtro de inclusão."
+          echo "has_files=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        # Remove arquivos cujo nome contenha os termos de exclusão (ex.: dump)
+        FINAL="$FILTERED"
+        if [[ -n "$IGNORE_TERMS" ]]; then
+          IFS=',' read -ra IGNORE_LIST <<< "$IGNORE_TERMS"
+          for term in "${IGNORE_LIST[@]}"; do
+            term=$(echo "$term" | xargs)
+            FINAL=$(echo "$FINAL" | grep -Fiv "$term" || true)
+          done
+        fi
+
+        FINAL=$(echo "$FINAL" | grep -v "^$" | sort -u || true)
+
+        if [[ -z "$FINAL" ]]; then
+          echo "Todos os arquivos encontrados foram ignorados (ex.: dump)."
+          echo "has_files=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        echo "==> Arquivos de migração candidatos:"
+        echo "$FINAL"
+
+        # Serializa lista com delimitador | para passar via output
+        ENCODED=$(echo "$FINAL" | tr '\n' '|' | sed 's/|$//')
+        echo "migration_files=$ENCODED" >> "$GITHUB_OUTPUT"
+        echo "has_files=true" >> "$GITHUB_OUTPUT"
+
+    # -------------------------------------------------------------------------
+    # 2. Prepara ambiente Python
+    # -------------------------------------------------------------------------
+    - name: Setup | Python
+      if: steps.collect.outputs.has_files == 'true'
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    # hashFiles() só resolve globs dentro de $GITHUB_WORKSPACE (workspace do
+    # repositório consumidor), portanto não pode referenciar o diretório da
+    # action diretamente. Calculamos o hash via shell, onde $GITHUB_ACTION_PATH
+    # é resolvido corretamente como variável de ambiente de runtime.
+    - name: Setup | Compute requirements hash
+      if: steps.collect.outputs.has_files == 'true'
+      id: req-hash
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "hash=$(sha256sum "$GITHUB_ACTION_PATH/requirements.txt" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+    - name: Setup | Cache pip
+      if: steps.collect.outputs.has_files == 'true'
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: migration-detector-pip-${{ steps.req-hash.outputs.hash }}
+
+    - name: Setup | Install openai SDK
+      if: steps.collect.outputs.has_files == 'true'
+      shell: bash
+      run: pip install -r "$GITHUB_ACTION_PATH/requirements.txt" --quiet --disable-pip-version-check
+
+    # -------------------------------------------------------------------------
+    # 3. Classifica as migrações com IA e gera o texto para o Slack
+    #
+    # Provedor primário:  GitHub Models API  (github_token + models: read)
+    #   endpoint: https://models.inference.ai.azure.com
+    #   sem custo adicional, sem secret extra
+    #
+    # Provedor fallback:  Hub externo de IA  (ai_api_key + ai_api_url custom)
+    #   ativado automaticamente quando ai_api_key é fornecido
+    # -------------------------------------------------------------------------
+    - name: Analyze | Classify migrations with AI
+      id: analyze
+      if: steps.collect.outputs.has_files == 'true'
+      shell: bash
+      env:
+        MIGRATION_FILES: ${{ steps.collect.outputs.migration_files }}
+        AI_API_URL: ${{ inputs.ai_api_url }}
+        AI_API_KEY: ${{ inputs.ai_api_key }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+        AI_MODEL: ${{ inputs.ai_model }}
+        MINIMUM_CONFIDENCE: ${{ inputs.minimum_confidence }}
+        PR_URL: ${{ github.event.pull_request.html_url }}
+        PR_TITLE: ${{ github.event.pull_request.title }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        REPO: ${{ github.repository }}
+      run: |
+        set -euo pipefail
+        python "$GITHUB_ACTION_PATH/classify.py"
+
+    # -------------------------------------------------------------------------
+    # 4. Define outputs para o caminho sem arquivos de migração
+    # -------------------------------------------------------------------------
+    - name: Outputs | No migration files found
+      id: no-change
+      if: steps.collect.outputs.has_files == 'false'
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "has_db_change=false"   >> "$GITHUB_OUTPUT"
+        echo "highest_severity=none" >> "$GITHUB_OUTPUT"
+        echo "confidence=1.0"        >> "$GITHUB_OUTPUT"
+        echo "slack_text="           >> "$GITHUB_OUTPUT"
+
+    # -------------------------------------------------------------------------
+    # 5. Consolida outputs em um único step referenciado pelos outputs da action
+    # -------------------------------------------------------------------------
+    - name: Outputs | Consolidate
+      id: set-outputs
+      shell: bash
+      env:
+        HAS_DB_CHANGE:    ${{ steps.analyze.outputs.has_db_change || steps.no-change.outputs.has_db_change }}
+        HIGHEST_SEVERITY: ${{ steps.analyze.outputs.highest_severity || steps.no-change.outputs.highest_severity }}
+        CONFIDENCE:       ${{ steps.analyze.outputs.confidence || steps.no-change.outputs.confidence }}
+      run: |
+        set -euo pipefail
+        echo "has_db_change=${HAS_DB_CHANGE:-false}"      >> "$GITHUB_OUTPUT"
+        echo "highest_severity=${HIGHEST_SEVERITY:-none}" >> "$GITHUB_OUTPUT"
+        echo "confidence=${CONFIDENCE:-1.0}"              >> "$GITHUB_OUTPUT"
+
+    # -------------------------------------------------------------------------
+    # 6. Posta notificação no Slack
+    # -------------------------------------------------------------------------
+    - name: Notify | Post to Slack
+      id: slack
+      if: steps.collect.outputs.has_files == 'true'
+      shell: bash
+      env:
+        SLACK_WEBHOOK_URL: ${{ inputs.slack_webhook_url }}
+        SLACK_CHANNEL:     ${{ inputs.slack_channel }}
+        SLACK_TEXT:        ${{ steps.analyze.outputs.slack_text }}
+        HIGHEST_SEVERITY:  ${{ steps.analyze.outputs.highest_severity }}
+      run: |
+        set -euo pipefail
+        # Usa Python para montar o JSON corretamente e evitar problemas de escaping
+        echo "{}" > /tmp/slack_resp.json
+
+        HTTP_STATUS=$(python3 "$GITHUB_ACTION_PATH/build_slack_payload.py" \
+          | curl -s \
+            -o /tmp/slack_resp.json \
+            -w "%{http_code}" \
+            -X POST \
+            -H "Content-Type: application/json" \
+            --data @- \
+            "$SLACK_WEBHOOK_URL") || true
+
+        echo "==> Slack HTTP status: $HTTP_STATUS"
+
+        if [[ "$HTTP_STATUS" != "200" ]]; then
+          echo "[WARN] Falha ao postar no Slack (status $HTTP_STATUS):"
+          cat /tmp/slack_resp.json || true
+        fi
+
+        TS=$(python3 -c \
+          "import sys,json; d=json.load(open('/tmp/slack_resp.json')); print(d.get('ts',''))" \
+          2>/dev/null || echo "")
+        echo "slack_message_ts=${TS}" >> "$GITHUB_OUTPUT"
+
+    # -------------------------------------------------------------------------
+    # 7. Sinaliza Breaking Change nos logs (sem falhar a pipeline)
+    # -------------------------------------------------------------------------
+    - name: Gate | Warn on Breaking Change
+      if: steps.set-outputs.outputs.highest_severity == 'breaking'
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "::warning::🔴 Breaking Change detectada em migração de banco de dados."
+        echo "::warning::Aguarde revisão do time de dados antes do merge."
