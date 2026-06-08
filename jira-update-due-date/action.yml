@@ -1,0 +1,63 @@
+name: 'Jira Update Due Date'
+author: 'José Luis da Cruz Junior'
+description: >
+  Atualiza o campo Due Date de issues do Jira que estão "In Progress",
+  estão sem Due Date e possuem Story Points. A data é calculada como
+  hoje + N dias úteis a partir de um mapa SP→dias. Quando a issue tem
+  subtarefas com Due Date, usa o maior entre elas (override).
+
+inputs:
+  jira_base_url:
+    required: true
+    description: 'URL base da instância Jira. Ex.: https://<your_org>.atlassian.net'
+  jira_user_email:
+    required: true
+    description: 'E-mail da conta de serviço usada para autenticar via Basic Auth.'
+  jira_api_token:
+    required: true
+    description: 'Token de API do Jira. Crie em https://id.atlassian.com/manage-profile/security/api-tokens'
+  jira_story_points_field:
+    required: true
+    description: >
+      ID(s) do customfield de Story Points, separados por vírgula.
+      Ex.: `customfield_11030,customfield_10008`. Avaliados em ordem;
+      o primeiro com valor não-nulo é usado. Útil quando a instância
+      do Jira tem múltiplos fields homônimos.
+  jira_scopes_file:
+    required: false
+    default: '.github/jira-scopes.json'
+    description: >
+      Caminho (no repositório consumidor) do JSON com `scopes` e
+      `story_points_to_business_days`. Veja o README para o schema.
+  jira_status_in_progress:
+    required: false
+    default: 'In Progress'
+    description: 'Nome do status considerado "em andamento" no JQL.'
+  python_version:
+    required: false
+    default: '3.11'
+    description: 'Versão do Python usada para executar o script.'
+  dry_run:
+    required: false
+    default: 'false'
+    description: 'Quando `true`, apenas loga as atualizações sem escrever no Jira.'
+
+runs:
+  using: composite
+  steps:
+    - name: Setup | Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python_version }}
+
+    - name: Run | Atualizar Due Date no Jira
+      shell: bash
+      env:
+        JIRA_BASE_URL: ${{ inputs.jira_base_url }}
+        JIRA_USER_EMAIL: ${{ inputs.jira_user_email }}
+        JIRA_API_TOKEN: ${{ inputs.jira_api_token }}
+        JIRA_STORY_POINTS_FIELD: ${{ inputs.jira_story_points_field }}
+        JIRA_SCOPES_FILE: ${{ inputs.jira_scopes_file }}
+        JIRA_STATUS_IN_PROGRESS: ${{ inputs.jira_status_in_progress }}
+        DRY_RUN: ${{ inputs.dry_run }}
+      run: python "$GITHUB_ACTION_PATH/update_jira_due_dates.py"
