@@ -53,6 +53,10 @@ inputs:
     description: 'Project Version'
     default: ''
     required: false
+  application_name:
+    description: 'Override application name for the SonarQube project key (defaults to repository name)'
+    default: ''
+    required: false
 
 runs:
   using: composite
@@ -90,7 +94,7 @@ runs:
         ${{ github.event_name == 'push' && inputs.project_version != '' && format('-Dsonar.projectVersion={0}', github.ref_name) || '' }}
       env:
         SONAR_HOST_URL: http://sonar.afya.tools:9000/
-        APPLICATION_NAME: ${{ github.event.repository.name }}
+        APPLICATION_NAME: ${{ inputs.application_name != '' && inputs.application_name || github.event.repository.name }}
         COMPANY: ${{ github.repository_owner }}
         SONAR_TOKEN: ${{ inputs.sonar_token }}
         GIT_DEPTH: 0
