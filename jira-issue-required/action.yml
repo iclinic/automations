@@ -22,156 +22,154 @@ inputs:
     required: false
     description: Create one at https://id.atlassian.com/manage-profile/security/api-tokens
   possible_issue_reference:
+    required: false
     description: Uma string que possivelmente contém o issue no Jira. Pode ser o nome da branch, o título do PR, etc. O padrão é o nome da branch.
     default: ""
   jira_status_allowed_to_merge:
     required: true
-    description: O status do Jira que permite o merge -> To Deployment
+    description: O status do Jira que permite o merge, por exemplo, To Deployment
   default_hotfix_prefix:
     required: false
     description: Prefixo da branch de hotfix. Default -> hotfix/
   default_revert_prefix:
     required: false
     description: Prefixo da branch de revert. Default -> revert/
+  check_jira_valid_project_prefixes:
+    required: false
+    default: "True"
+    description: Habilita a verificação dos prefixos de projetos válidos no Jira. Padrão -> True. Se for false/0/no/off (case-insensitive), a verificação é ignorada; qualquer outro valor a mantém habilitada.
+  jira_valid_project_prefixes:
+    required: false
+    description: "Prefixos dos projetos válidos no Jira (spaces), separados por vírgula. Ex: PROJ1,PROJ2. Quando informado, o card encontrado na branch ou título deve pertencer a um desses spaces; caso contrário, o fluxo SOX não reconhecerá o space como válido."
+    default: ""
+  approved_field_for_development_by_field_is_empty:
+    required: false
+    default: ""
+    description: Nome do campo contendo quem aprovou para desenvolvimento para verificar se não está vazio.
+
+outputs:
+  issue_key:
+    description: "A chave do issue detectada na referência (branch/título), ex.: SHS-491."
+    value: ${{ steps.export_outputs.outputs.issue_key }}
+  issue_status:
+    description: O status do issue retornado pelo Jira, quando encontrado.
+    value: ${{ steps.export_outputs.outputs.issue_status }}
 
 runs:
   using: composite
   steps:
     - name: Setup | Environment
+      env:
+        POSSIBLE_ISSUE_REFERENCE_INPUT: ${{ inputs.possible_issue_reference }}
+        ACTION_PATH: ${{ github.action_path }}
       shell: bash
       run: |
-        echo "POSSIBLE_ISSUE_REFERENCE=${{ inputs.possible_issue_reference }}" >> "$GITHUB_ENV"
-        echo "ISSUE_KEY_FOUND=0" >> "$GITHUB_ENV"
-        echo "PREFIX_TO_IGNORE_FOUND=0" >> "$GITHUB_ENV"
-        echo "BRANCH_NAME=0" >> "$GITHUB_ENV"
+        # Strip CR/LF from untrusted input so it can't inject extra GITHUB_ENV lines.
+        {
+          printf 'POSSIBLE_ISSUE_REFERENCE=%s\n' "${POSSIBLE_ISSUE_REFERENCE_INPUT//[$'\r\n']/ }"
+          echo "ISSUE_KEY_FOUND=0"
+          echo "PREFIX_TO_IGNORE_FOUND=0"
+          echo "BRANCH_NAME="
+          echo "JIRA_CHECK_HELPER_PATH=$ACTION_PATH/jira_issue_check.sh"
+        } >> "$GITHUB_ENV"
 
-    - name: Get Possible Issue Reference - Default / Push Event in PR
-      if: env.POSSIBLE_ISSUE_REFERENCE == '' && github.event_name == 'push' && github.event.pull_request != null
-      shell: bash
-      run: echo "POSSIBLE_ISSUE_REFERENCE=${{ github.ref_name }} ${{ github.event.pull_request.title }}" >> "$GITHUB_ENV"
+        chmod +x "$ACTION_PATH/jira_issue_check.sh"
 
-    - name: Get Possible Issue Reference - Default / Push Event without PR
+    - name: Get Possible Issue Reference - Default / Push Event
       if: env.POSSIBLE_ISSUE_REFERENCE == '' && github.event_name == 'push'
+      env:
+        REF_NAME: ${{ github.ref_name }}
       shell: bash
-      run: echo "POSSIBLE_ISSUE_REFERENCE=${{ github.ref_name }}" >> "$GITHUB_ENV"
+      run: printf 'POSSIBLE_ISSUE_REFERENCE=%s\n' "${REF_NAME//[$'\r\n']/ }" >> "$GITHUB_ENV"
 
     - name: Get Possible Issue Reference - Default / Pull Request Event
       if: env.POSSIBLE_ISSUE_REFERENCE == '' && startsWith(github.event_name, 'pull_request')
-      shell: bash
-      run: echo "POSSIBLE_ISSUE_REFERENCE=${{ github.head_ref }} ${{ github.event.pull_request.title }}" >> "$GITHUB_ENV"
-
-    - name: Get Branch name for Hotfix/Revert exceptions
+      env:
+        HEAD_REF: ${{ github.head_ref }}
+        PR_TITLE: ${{ github.event.pull_request.title }}
       shell: bash
       run: |
-        if [[ -n "${{ github.event.pull_request.head.ref }}" ]]; then
-          echo "BRANCH_NAME=${{ github.event.pull_request.head.ref }}" >> "$GITHUB_ENV"
+        # PR title is attacker-controlled: pass via env and strip newlines,
+        # never interpolate GitHub expressions straight into the shell.
+        REFERENCE="$HEAD_REF $PR_TITLE"
+        printf 'POSSIBLE_ISSUE_REFERENCE=%s\n' "${REFERENCE//[$'\r\n']/ }" >> "$GITHUB_ENV"
+
+    - name: Get Branch name for Hotfix/Revert exceptions
+      env:
+        PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        REF_NAME: ${{ github.ref_name }}
+      shell: bash
+      run: |
+        if [[ -n "$PR_HEAD_REF" ]]; then
+          BRANCH="$PR_HEAD_REF"
         else
-          echo "BRANCH_NAME=${{ github.ref_name }}" >> "$GITHUB_ENV"
+          BRANCH="$REF_NAME"
         fi
+        printf 'BRANCH_NAME=%s\n' "${BRANCH//[$'\r\n']/ }" >> "$GITHUB_ENV"
 
     - name: Check if issue key exists
       env:
         JIRA_BASE_URL: ${{ inputs.jira_base_url }}
         JIRA_USER_EMAIL: ${{ inputs.jira_user_email }}
         JIRA_API_TOKEN: ${{ inputs.jira_api_token }}
-        JIRA_STATUS_ALLOWED_TO_MERGE: ${{ inputs.JIRA_STATUS_ALLOWED_TO_MERGE }}
+        JIRA_STATUS_ALLOWED_TO_MERGE: ${{ inputs.jira_status_allowed_to_merge }}
         DEFAULT_HOTFIX_PREFIX: ${{ inputs.default_hotfix_prefix }}
         DEFAULT_REVERT_PREFIX: ${{ inputs.default_revert_prefix }}
         BRANCH_NAME: ${{ env.BRANCH_NAME }}
+        CHECK_JIRA_VALID_PROJECT_PREFIXES: ${{ inputs.check_jira_valid_project_prefixes }}
+        JIRA_VALID_PROJECT_PREFIXES: ${{ inputs.jira_valid_project_prefixes }}
+        APPROVED_FIELD_FOR_DEVELOPMENT_BY_FIELD_IS_EMPTY: ${{ inputs.approved_field_for_development_by_field_is_empty }}
+        JIRA_CHECK_CONTEXT: Primary Jira check
       shell: bash
-      run: |
-        ISSUE_KEY=$(echo "$POSSIBLE_ISSUE_REFERENCE" | grep -oE '[a-zA-Z0-9]{1,10}-[0-9]+' | head -n 1)
-        echo "ISSUE_KEY=$ISSUE_KEY" >> "$GITHUB_ENV"
-
-        echo "DEFAULT_HOTFIX_PREFIX [$DEFAULT_HOTFIX_PREFIX]"
-        echo "DEFAULT_REVERT_PREFIX [$DEFAULT_REVERT_PREFIX]"
-        echo "BRANCH_NAME [$BRANCH_NAME]"
-
-        if [[ "${{ env.BRANCH_NAME }}" == "${{ env.DEFAULT_HOTFIX_PREFIX }}"* ]]; then
-          echo "PREFIX_TO_IGNORE_FOUND=1" >> "$GITHUB_ENV"
-          echo "Hotfix branch detected, skipping Jira issue status check."
-          exit 0
-        fi
-
-        if [[ "${{ env.BRANCH_NAME }}" == "${{ env.DEFAULT_REVERT_PREFIX }}"* ]]; then
-          echo "PREFIX_TO_IGNORE_FOUND=1" >> "$GITHUB_ENV"
-          echo "Revert branch detected, skipping Jira issue status check."
-          exit 0
-        fi
-
-        echo "Searching for Jira issue $ISSUE_KEY at $JIRA_BASE_URL"
-        JIRA_API_ISSUE_ENDPOINT="$JIRA_BASE_URL/rest/api/2/issue/$ISSUE_KEY?fields=key,status"
-        echo "Requesting issue at $JIRA_API_ISSUE_ENDPOINT"
-        JIRA_RESPONSE_STATUS=$(curl --request GET --url "$JIRA_API_ISSUE_ENDPOINT" --user "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" | jq .fields.status.name) >> "$GITHUB_ENV"
-        echo "Response Status [$JIRA_RESPONSE_STATUS]"
-        echo "JIRA_STATUS_ALLOWED_TO_MERGE -> [$JIRA_STATUS_ALLOWED_TO_MERGE]"
-        echo "JIRA_RESPONSE_STATUS=$JIRA_RESPONSE_STATUS" >> "$GITHUB_ENV"
-        echo "JIRA_STATUS_ALLOWED_TO_MERGE=$JIRA_STATUS_ALLOWED_TO_MERGE" >> "$GITHUB_ENV"
-
-        if [ "$JIRA_RESPONSE_STATUS" != "null" ]; then
-          echo "ISSUE_KEY_FOUND=1" >> "$GITHUB_ENV"
-          echo "Issue key found!"
-        fi
+      run: bash "$JIRA_CHECK_HELPER_PATH"
 
     - name: Check if issue key exists in alternative Jira
-      if: env.ISSUE_KEY_FOUND == 0 && env.PREFIX_TO_IGNORE_FOUND==0 && inputs.jira_alternative_base_url != '' && inputs.jira_alternative_user_email != '' && inputs.jira_alternative_api_token != ''
+      if: env.ISSUE_KEY_FOUND == 0 && env.PREFIX_TO_IGNORE_FOUND == 0 && inputs.jira_alternative_base_url != '' && inputs.jira_alternative_user_email != '' && inputs.jira_alternative_api_token != ''
       env:
         JIRA_BASE_URL: ${{ inputs.jira_alternative_base_url }}
         JIRA_USER_EMAIL: ${{ inputs.jira_alternative_user_email }}
         JIRA_API_TOKEN: ${{ inputs.jira_alternative_api_token }}
-        JIRA_STATUS_ALLOWED_TO_MERGE: ${{ inputs.JIRA_STATUS_ALLOWED_TO_MERGE }}
+        JIRA_STATUS_ALLOWED_TO_MERGE: ${{ inputs.jira_status_allowed_to_merge }}
         DEFAULT_HOTFIX_PREFIX: ${{ inputs.default_hotfix_prefix }}
         DEFAULT_REVERT_PREFIX: ${{ inputs.default_revert_prefix }}
         BRANCH_NAME: ${{ env.BRANCH_NAME }}
+        CHECK_JIRA_VALID_PROJECT_PREFIXES: ${{ inputs.check_jira_valid_project_prefixes }}
+        JIRA_VALID_PROJECT_PREFIXES: ${{ inputs.jira_valid_project_prefixes }}
+        APPROVED_FIELD_FOR_DEVELOPMENT_BY_FIELD_IS_EMPTY: ${{ inputs.approved_field_for_development_by_field_is_empty }}
+        JIRA_CHECK_CONTEXT: Alternative Jira check
       shell: bash
-      run: |
-        ISSUE_KEY=$(echo "$POSSIBLE_ISSUE_REFERENCE" | grep -oE '[a-zA-Z0-9]{1,10}-[0-9]+' | head -n 1)
-        echo "ISSUE_KEY=$ISSUE_KEY" >> "$GITHUB_ENV"
-        echo "Alternative Jira check"
-
-        echo "DEFAULT_HOTFIX_PREFIX [$DEFAULT_HOTFIX_PREFIX]"
-        echo "DEFAULT_REVERT_PREFIX [$DEFAULT_REVERT_PREFIX]"
-        echo "BRANCH_NAME [$BRANCH_NAME]"
-
-        if [[ "${{ env.BRANCH_NAME }}" == "${{ env.DEFAULT_HOTFIX_PREFIX }}"* ]]; then
-          echo "PREFIX_TO_IGNORE_FOUND=1" >> "$GITHUB_ENV"
-          echo "Hotfix branch detected, skipping Jira issue status check."
-          exit 0
-        fi
-
-        if [[ "${{ env.BRANCH_NAME }}" == "${{ env.DEFAULT_REVERT_PREFIX }}"* ]]; then
-          echo "PREFIX_TO_IGNORE_FOUND=1" >> "$GITHUB_ENV"
-          echo "Revert branch detected, skipping Jira issue status check."
-          exit 0
-        fi
-
-        echo "Searching for Jira issue $ISSUE_KEY at $JIRA_BASE_URL"
-        JIRA_API_ISSUE_ENDPOINT="$JIRA_BASE_URL/rest/api/2/issue/$ISSUE_KEY?fields=key,status"
-        echo "Requesting issue at $JIRA_API_ISSUE_ENDPOINT"
-        JIRA_RESPONSE_STATUS=$(curl --request GET --url "$JIRA_API_ISSUE_ENDPOINT" --user "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" | jq .fields.status.name) >> "$GITHUB_ENV"
-        echo "Response Status [$JIRA_RESPONSE_STATUS]"
-        echo "JIRA_STATUS_ALLOWED_TO_MERGE -> [$JIRA_STATUS_ALLOWED_TO_MERGE]"
-        echo "JIRA_RESPONSE_STATUS=$JIRA_RESPONSE_STATUS" >> "$GITHUB_ENV"
-        echo "JIRA_STATUS_ALLOWED_TO_MERGE=$JIRA_STATUS_ALLOWED_TO_MERGE" >> "$GITHUB_ENV"
-
-        if [ "$JIRA_RESPONSE_STATUS" != "null" ]; then
-          echo "ISSUE_KEY_FOUND=1" >> "$GITHUB_ENV"
-          echo "Issue key found!"
-        fi
+      run: bash "$JIRA_CHECK_HELPER_PATH"
 
     - name: Fail if not found
       if: env.ISSUE_KEY_FOUND == 0 && env.PREFIX_TO_IGNORE_FOUND == 0
+      env:
+        POSSIBLE_ISSUE_REFERENCE: ${{ env.POSSIBLE_ISSUE_REFERENCE }}
       shell: bash
       run: |
-        echo "Issue not found in '${{ env.POSSIBLE_ISSUE_REFERENCE }}'!"
+        echo "Issue not found in '$POSSIBLE_ISSUE_REFERENCE'!"
         exit 1
 
     - name: Fail if status is not allowed to deploy
       if: env.ISSUE_KEY_FOUND == 1 && env.PREFIX_TO_IGNORE_FOUND == 0
+      env:
+        JIRA_STATUS_ALLOWED_TO_MERGE: ${{ inputs.jira_status_allowed_to_merge }}
+        JIRA_RESPONSE_STATUS: ${{ env.JIRA_RESPONSE_STATUS }}
       shell: bash
       run: |
-        JIRA_STATUS_ALLOWED_TO_MERGE_STR="${{ env.JIRA_STATUS_ALLOWED_TO_MERGE }}"
-        if [ ${{ env.JIRA_RESPONSE_STATUS }} != "$JIRA_STATUS_ALLOWED_TO_MERGE_STR" ]; then
-          echo "Issue status is not allowed to merge because ${{ env.JIRA_RESPONSE_STATUS }} is not $JIRA_STATUS_ALLOWED_TO_MERGE_STR!"
+        if [[ "$JIRA_RESPONSE_STATUS" != "$JIRA_STATUS_ALLOWED_TO_MERGE" ]]; then
+          echo "Issue status is not allowed to merge because '$JIRA_RESPONSE_STATUS' is not '$JIRA_STATUS_ALLOWED_TO_MERGE'!"
           exit 1
         fi
+
+    - name: Export outputs
+      id: export_outputs
+      if: always()
+      env:
+        ISSUE_KEY: ${{ env.ISSUE_KEY }}
+        JIRA_RESPONSE_STATUS: ${{ env.JIRA_RESPONSE_STATUS }}
+      shell: bash
+      run: |
+        {
+          printf 'issue_key=%s\n' "$ISSUE_KEY"
+          printf 'issue_status=%s\n' "$JIRA_RESPONSE_STATUS"
+        } >> "$GITHUB_OUTPUT"
