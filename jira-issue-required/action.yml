@@ -90,7 +90,7 @@ runs:
       shell: bash
       run: |
         # PR title is attacker-controlled: pass via env and strip newlines,
-        # never interpolate ${{ }} straight into the shell.
+        # never interpolate GitHub expressions straight into the shell.
         REFERENCE="$HEAD_REF $PR_TITLE"
         printf 'POSSIBLE_ISSUE_REFERENCE=%s\n' "${REFERENCE//[$'\r\n']/ }" >> "$GITHUB_ENV"
 
