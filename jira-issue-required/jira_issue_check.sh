@@ -140,8 +140,6 @@ if [[ "$ISSUE_KEY_FOUND" == 1 && -n "$APPROVED_FIELD_FOR_DEVELOPMENT_BY_FIELD_IS
   # Pass the field name as data (--arg) instead of interpolating it into the jq
   # program: avoids jq injection and handles field names with special chars.
   JIRA_RESPONSE_RESPONSIBLE_FIELD=$(jq -r --arg f "$APPROVED_FIELD_FOR_DEVELOPMENT_BY_FIELD_IS_EMPTY" '.fields[$f]' < "$APPROVED_BODY_FILE")
-  echo "Response field value = '$JIRA_RESPONSE_RESPONSIBLE_FIELD'"
-
   if [[ "$JIRA_RESPONSE_RESPONSIBLE_FIELD" != "null" ]]; then
     echo "Approved for development by field isn't empty."
   else
