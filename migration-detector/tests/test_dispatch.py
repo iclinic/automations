@@ -54,9 +54,45 @@ export class DropQty1700000000000 implements MigrationInterface {
 }
 """
 
-SOURCES = {"django": DJANGO, "alembic": ALEMBIC, "sql": SQL, "typeorm": TYPEORM}
+DOCTRINE = """\
+<?php
 
-SUFFIX = {"django": ".py", "alembic": ".py", "sql": ".sql", "typeorm": ".ts"}
+declare(strict_types=1);
+
+namespace Migrations;
+
+use Doctrine\\DBAL\\Schema\\Schema;
+use Doctrine\\Migrations\\AbstractMigration;
+
+final class Version20260101000000 extends AbstractMigration
+{
+    public function up(Schema $schema): void
+    {
+        $this->addSql('ALTER TABLE orders DROP COLUMN qty');
+    }
+
+    public function down(Schema $schema): void
+    {
+        $this->addSql('ALTER TABLE orders ADD COLUMN qty INT NULL');
+    }
+}
+"""
+
+SOURCES = {
+    "django": DJANGO,
+    "alembic": ALEMBIC,
+    "sql": SQL,
+    "typeorm": TYPEORM,
+    "doctrine": DOCTRINE,
+}
+
+SUFFIX = {
+    "django": ".py",
+    "alembic": ".py",
+    "sql": ".sql",
+    "typeorm": ".ts",
+    "doctrine": ".php",
+}
 
 
 def write(tmp_path, name: str, source: str) -> pathlib.Path:
@@ -115,7 +151,7 @@ class TestDispatchTable:
         # `.sql` dispensa marcador porque `sql.py` classifica todo statement e
         # devolve `unknown` para o verbo que não reconhece — um `.sql` de
         # dialeto estranho não sai em silêncio, sai como `unknown` do parser.
-        # Os outros três precisam, e este teste é o que obriga uma linha nova a
+        # Os outros quatro precisam, e este teste é o que obriga uma linha nova a
         # justificar a ausência em vez de herdá-la.
         assert {s.name for s in STACKS if s.marker is None} == {"sql"}
 
@@ -129,7 +165,7 @@ class TestDispatchTable:
             if l.strip().startswith("default:") and "*.sql" in l
         )
         globs = line.split("'")[1].split(",")
-        assert len(globs) >= 6, globs
+        assert len(globs) >= 7, globs
         suffixes = {pathlib.PurePath(g.strip()).suffix.lower() for g in globs}
         assert suffixes <= {stack.suffix for stack in STACKS}, suffixes
 

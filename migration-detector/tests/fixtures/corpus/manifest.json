@@ -126,6 +126,13 @@
       "severity": "unknown"
     }
   ],
+  "dispatch/doctrine_generator.php": [
+    {
+      "operation": "Arquivo",
+      "reason": "O arquivo casou `migration_paths` e declara operações, mas não é uma migração de doctrine — o classificador não conhece este formato — precisa de revisão manual.",
+      "severity": "unknown"
+    }
+  ],
   "dispatch/not_a_migration.py": [],
   "dispatch/south_style_migration.py": [
     {
@@ -407,6 +414,141 @@
     }
   ],
   "django/subjects/migrations/__init__.py": [],
+  "doctrine/Migrations/mysql/Version20250101120000.php": [
+    {
+      "operation": "CREATE TABLE",
+      "reason": "Tabela `freight_note` criada.",
+      "severity": "safe"
+    }
+  ],
+  "doctrine/Migrations/mysql/Version20250101120100.php": [
+    {
+      "operation": "ADD COLUMN",
+      "reason": "Coluna `carrier_name` adicionada em `freight_note`.",
+      "severity": "safe"
+    },
+    {
+      "operation": "UPDATE",
+      "reason": "Statement não reconhecido pelo classificador: UPDATE freight_note SET carrier_name = :name WHERE carrier_code = :code — precisa de revisão manual.",
+      "severity": "unknown"
+    }
+  ],
+  "doctrine/Migrations/mysql/Version20250101120200.php": [
+    {
+      "operation": "DROP COLUMN",
+      "reason": "Coluna `settled` removida de `freight_note` — quem lê essa coluna quebra.",
+      "severity": "breaking"
+    },
+    {
+      "operation": "MODIFY ... NOT NULL",
+      "reason": "Coluna `carrier_code` de `freight_note` passou a NOT NULL — insert sem valor passa a falhar.",
+      "severity": "breaking"
+    }
+  ],
+  "doctrine/Migrations/mysql/Version20250101120300.php": [
+    {
+      "operation": "DROP TABLE",
+      "reason": "Tabela `warehouse_bin` removida — quem lê essa tabela quebra.",
+      "severity": "breaking"
+    }
+  ],
+  "doctrine/Migrations/mysql/Version20250101120400.php": [
+    {
+      "operation": "addSql",
+      "reason": "SQL em string que interpola — o classificador só lê as duas formas literais do PHP, a de aspa simples e o nowdoc, precisa de revisão manual.",
+      "severity": "unknown"
+    }
+  ],
+  "doctrine/Migrations/mysql/Version20250101120500.php": [
+    {
+      "operation": "addSql",
+      "reason": "SQL montado dinamicamente — o classificador só lê SQL literal, precisa de revisão manual.",
+      "severity": "unknown"
+    }
+  ],
+  "doctrine/Migrations/pgsql/Version20250201120000.php": [
+    {
+      "operation": "CREATE TABLE",
+      "reason": "Tabela `stock.warehouse_bin` criada.",
+      "severity": "safe"
+    },
+    {
+      "operation": "CREATE UNIQUE INDEX",
+      "reason": "Índice único criado em `stock.warehouse_bin` — linha duplicada já existente impede a migração e gravação duplicada passa a falhar.",
+      "severity": "breaking"
+    }
+  ],
+  "doctrine/Migrations/pgsql/Version20250201120100.php": [
+    {
+      "operation": "ALTER COLUMN ... SET NOT NULL",
+      "reason": "Coluna `bin_label` de `stock.warehouse_bin` passou a NOT NULL — insert sem valor passa a falhar.",
+      "severity": "breaking"
+    },
+    {
+      "operation": "DROP COLUMN",
+      "reason": "Coluna `capacity` removida de `stock.warehouse_bin` — quem lê essa coluna quebra.",
+      "severity": "breaking"
+    }
+  ],
+  "doctrine/Migrations/pgsql/Version20250201120200.php": [
+    {
+      "operation": "DROP TABLE",
+      "reason": "Tabela `stock.warehouse_bin` removida — quem lê essa tabela quebra.",
+      "severity": "breaking"
+    }
+  ],
+  "doctrine/Migrations/pgsql/Version20250201120300.php": [
+    {
+      "operation": "INSERT",
+      "reason": "Statement não reconhecido pelo classificador: INSERT INTO stock.… — precisa de revisão manual.",
+      "severity": "unknown"
+    },
+    {
+      "operation": "DELETE",
+      "reason": "Statement não reconhecido pelo classificador: DELETE FROM stock.… — precisa de revisão manual.",
+      "severity": "unknown"
+    }
+  ],
+  "doctrine/Migrations/pgsql/Version20250201120400.php": [
+    {
+      "operation": "CREATE INDEX",
+      "reason": "Índice criado em `stock.freight_note`.",
+      "severity": "safe"
+    },
+    {
+      "operation": "DROP COLUMN",
+      "reason": "Coluna `net_amount` removida de `stock.freight_note` — quem lê essa coluna quebra.",
+      "severity": "breaking"
+    }
+  ],
+  "doctrine/Migrations/pgsql/Version20250201120500.php": [
+    {
+      "operation": "addSql",
+      "reason": "Chamada `addSql()` sem SQL a executar — não altera schema.",
+      "severity": "none"
+    }
+  ],
+  "doctrine/Migrations/pgsql/Version20250201120600.php": [
+    {
+      "operation": "up",
+      "reason": "O arquivo define `up()` mais de uma vez e o classificador não sabe qual roda — precisa de revisão manual.",
+      "severity": "unknown"
+    }
+  ],
+  "doctrine/Migrations/pgsql/Version20250201120700.php": [
+    {
+      "operation": "up",
+      "reason": "O corpo de `up()` não fecha e o classificador não delimitou os statements — precisa de revisão manual.",
+      "severity": "unknown"
+    }
+  ],
+  "doctrine/Migrations/pgsql/Version20250201120800.php": [
+    {
+      "operation": "Arquivo",
+      "reason": "O arquivo declara operações que o classificador de doctrine não leu — precisa de revisão manual.",
+      "severity": "unknown"
+    }
+  ],
   "sql/0001_create_objects.sql": [
     {
       "operation": "BEGIN",

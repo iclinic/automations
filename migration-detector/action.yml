@@ -37,11 +37,29 @@ inputs:
       Pode ser removido do workflow.
   migration_paths:
     required: false
-    default: '**/*.sql,**/migrations/*.py,**/alembic/versions/*.py,**/*AutoMigrate.ts,**/*automigrate.ts,**/migrations/*.ts'
+    default: '**/*.sql,**/migrations/*.py,**/alembic/versions/*.py,**/*AutoMigrate.ts,**/*automigrate.ts,**/migrations/*.ts,**/Migrations/*/Version20*.php'
     description: >
       Globs separados por vírgula para identificar arquivos de migração. Cobre:
-      SQL puro, Django (migrations/*.py), Alembic/FastAPI (alembic/versions/*.py)
-      e TypeScript com AutoMigrate ou escrito à mão em migrations/*.ts.
+      SQL puro, Django (migrations/*.py), Alembic/FastAPI (alembic/versions/*.py),
+      TypeScript com AutoMigrate ou escrito à mão em migrations/*.ts, e Doctrine
+      Migrations em PHP (Migrations/<banco>/Version*.php).
+
+      O `*` do meio do glob do Doctrine é o **diretório do banco**, e é ele que
+      faz o consumidor de duas bases entrar inteiro: o `migrations_path` de cada
+      conexão do `Migrations/migrations.php` é um diretório diferente — um MySQL,
+      que guarda o financeiro do SaaS, e um PostgreSQL, que guarda o resto do
+      sistema —, e um glob que nomeasse os dois diretórios deixaria uma terceira
+      base futura fora do alerta sem que nada falhasse. Um banco fora do glob é
+      um banco sem proteção, e é o silêncio que esta action existe para acabar.
+
+      O `20` depois de `Version` não é decoração. O runner do consumidor mora em
+      `Migrations/Migrator/`, e o `VersionHelper.php` de lá casaria
+      `Migrations/*/Version*.php` — entraria na coleta a cada mexida no runner e
+      sairia como `unknown`, porque não é migração. O nome do arquivo de uma
+      migração do Doctrine é `VersionAAAAMMDDHHMMSS`, então o prefixo do ano
+      separa os dois. Recortar isso com `Version[0-9]*` seria mais claro, mas a
+      conversão glob→regex do step `Collect` só entende `*`, `**` e ponto
+      literal, e classe de caractere é erro de configuração ali por decisão.
   ignore_name_contains:
     required: false
     default: 'dump'

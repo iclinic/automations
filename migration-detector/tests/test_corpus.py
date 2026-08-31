@@ -156,6 +156,28 @@ RESIDUE: dict[str, str] = {
         "verbo fora da tabela de statements",
     "sql/0009_alter_column_action_unrecognised.sql":
         "ação de ALTER COLUMN fora da tabela",
+    # --- o resíduo do Doctrine, nas duas bases ----------------------------
+    #
+    # Metade do corpus real deste consumidor é migração de dados, e `INSERT`,
+    # `UPDATE` e `DELETE` são verbos fora da tabela de statements do `sql.py` nas
+    # quatro stacks. As duas primeiras linhas são esse caso, uma por base — e são
+    # elas que explicam por que a taxa de determinismo por arquivo deste stack é
+    # a mais baixa das quatro sem que nenhum DDL tenha deixado de ser decidido.
+    "doctrine/Migrations/mysql/Version20250101120100.php":
+        "UPDATE com parâmetros nomeados — verbo de DML, fora da tabela de statements",
+    "doctrine/Migrations/pgsql/Version20250201120300.php":
+        "INSERT e DELETE com parâmetros nomeados — idem, na outra base",
+    "doctrine/Migrations/mysql/Version20250101120400.php":
+        "heredoc interpolado — o SQL que roda pode não ser o que está escrito",
+    "doctrine/Migrations/mysql/Version20250101120500.php":
+        "SQL montado por concatenação",
+    "doctrine/Migrations/pgsql/Version20250201120600.php":
+        "duas definições de up(), em duas classes do mesmo arquivo",
+    "doctrine/Migrations/pgsql/Version20250201120700.php":
+        "corpo de up() que não fecha",
+    "doctrine/Migrations/pgsql/Version20250201120800.php":
+        "migração escrita com o schema builder — parser certo, zero findings, "
+        "e o arquivo declara operações",
     # --- os `unknown` que o próprio dispatch produz ------------------------
     "dispatch/activerecord_style_migration.rb":
         "extensão sem classificador",
@@ -167,6 +189,9 @@ RESIDUE: dict[str, str] = {
         "parser certo, zero findings, e o arquivo declara operações",
     "dispatch/yoyo_style_migration.py":
         "dialeto de migração que o pacote não conhece",
+    "dispatch/doctrine_generator.php":
+        "o gerador que escreve migrações, e que traz o marcador do Doctrine "
+        "escrito por extenso dentro de um heredoc",
 }
 
 
@@ -195,11 +220,39 @@ REAL_CORPUS = {
         # RENAME` que o classificador não decide. Ver `REAL_TYPEORM_STATEMENTS`.
         "unknown_files": 2,
     },
+    "doctrine": {
+        # O `*` do meio é o diretório do banco, e é ele que faz as **duas** bases
+        # entrarem na medição — a do financeiro e a do resto do sistema. O `2`
+        # depois de `Version` deixa fora o `VersionHelper.php` do runner, que não
+        # é migração; é o mesmo recorte do glob de `migration_paths`.
+        "glob": "Migrations/*/Version2*.php",
+        "files": 18,
+        # A mais alta das quatro stacks, e não é o parser: 10 dos 18 arquivos são
+        # migração de dados, e `INSERT`, `UPDATE` e `DELETE` são verbos fora da
+        # tabela de statements do `sql.py` — a mesma resposta que o `RunSQL` do
+        # Django e o `op.execute()` do Alembic dão. Todo statement de DDL dos 18
+        # arquivos é decidido; ver `REAL_DOCTRINE`, que separa os dois números.
+        "unknown_files": 10,
+    },
 }
 
 # `typeorm.py` devolve um finding por statement, então a medição do repositório
 # de vídeo tem um segundo número que os outros dois não têm.
 REAL_TYPEORM_STATEMENTS = {"total": 133, "unknown": 2}
+
+# `doctrine.py` também devolve um finding por statement, e a medição dele tem um
+# terceiro número que nenhum outro stack tem: a quebra por **banco**. O cartão da
+# SHS-606 existe por causa dela — um alerta que cobrisse só o PostgreSQL deixaria
+# a base do financeiro sem proteção —, então a contagem por diretório de banco é
+# afirmada e não deduzida.
+REAL_DOCTRINE = {
+    "statements": {"total": 36, "unknown": 13},
+    # Os verbos que sobram sem classificação, e a razão de a taxa por arquivo ser
+    # o que é. Igualdade, e não contenção: se um DDL passar a sair `unknown`, o
+    # conjunto cresce e o teste cai.
+    "unknown_operations": {"INSERT", "UPDATE", "DELETE"},
+    "databases": {"mysql": 7, "pgsql": 11},
+}
 
 
 # ---------------------------------------------------------------------------
@@ -790,6 +843,54 @@ class TestTheRealCorpus:
         assert len(findings) >= REAL_TYPEORM_STATEMENTS["total"]
         assert len(unknown) <= REAL_TYPEORM_STATEMENTS["unknown"]
         assert {f.operation for f in unknown} == {"ALTER TYPE"}
+
+    def test_the_doctrine_statements_did_not_lose_coverage(self):
+        """O segundo número do consumidor Doctrine: statements, não arquivos."""
+        files = _real_files("doctrine")
+        if not files:
+            pytest.skip(_why_it_skipped("doctrine"))
+        findings = [f for p in files for f in detect.classify_file(p)]
+        unknown = [f for f in findings if f.severity is Severity.UNKNOWN]
+        assert len(findings) == REAL_DOCTRINE["statements"]["total"]
+        assert len(unknown) <= REAL_DOCTRINE["statements"]["unknown"]
+
+    def test_every_doctrine_unknown_is_a_data_verb_and_no_ddl_escaped(self):
+        """A afirmação que a taxa por arquivo sozinha não faz.
+
+        10 dos 18 arquivos voltam com pelo menos um `unknown`, e a leitura fácil
+        disso é "o parser lê mal PHP". O que está acontecendo é outra coisa: todo
+        `unknown` do consumidor é um verbo de DML, e nenhum statement de DDL
+        deixou de ser decidido. Um `DROP COLUMN` que passasse a sair `unknown`
+        acrescentaria `DROP COLUMN` ao conjunto e derrubaria este teste.
+        """
+        files = _real_files("doctrine")
+        if not files:
+            pytest.skip(_why_it_skipped("doctrine"))
+        unknown = [
+            f
+            for p in files
+            for f in detect.classify_file(p)
+            if f.severity is Severity.UNKNOWN
+        ]
+        assert unknown  # senão o conjunto abaixo é vazio e não afirma nada
+        assert {f.operation for f in unknown} == REAL_DOCTRINE["unknown_operations"]
+
+    def test_both_databases_of_the_doctrine_consumer_are_in_the_flow(self):
+        """O motivo de existir do cartão, medido.
+
+        As migrações do consumidor moram em um diretório por banco, e um glob que
+        alcançasse só um deles deixaria o outro sem alerta nenhum — o silêncio
+        que esta action existe para acabar. O teste conta por diretório e exige
+        que os dois tenham arquivo **classificado**, não só coletado.
+        """
+        files = _real_files("doctrine")
+        if not files:
+            pytest.skip(_why_it_skipped("doctrine"))
+        by_database: dict[str, int] = {}
+        for path in files:
+            assert detect.stack_for(path, detect.read_source(path)) == "doctrine", path
+            by_database[path.parent.name] = by_database.get(path.parent.name, 0) + 1
+        assert by_database == REAL_DOCTRINE["databases"]
 
     def test_the_adr_fixtures_say_what_the_real_files_say(self):
         """As fixturas da ADR reproduzem o veredito dos arquivos reais.

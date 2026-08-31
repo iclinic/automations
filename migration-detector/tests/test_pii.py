@@ -486,6 +486,11 @@ _REAL_GLOBS = {
     "django": "django/app/*/migrations/*.py",
     "alembic": "**/versions/*.py",
     "typeorm": "migrations/*.ts",
+    # O `*` do meio é o diretório do banco: o consumidor Doctrine tem dois, e o
+    # vocabulário dos dois entra na varredura. Um glob que cobrisse só um deles
+    # deixaria metade do schema real fora da comparação, e uma fixture que
+    # copiasse um nome de lá passaria batido.
+    "doctrine": "Migrations/*/Version2*.php",
 }
 
 # Palavra que colide por ser comum, não por identificar estes serviços.

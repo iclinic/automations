@@ -189,9 +189,10 @@ def _echo(raw: str, limit: int = 120) -> str:
     """Statement em uma linha para o Slack, cortado antes do primeiro valor.
 
     O corte não é cosmético. Statement não reconhecido cai aqui, `INSERT` e
-    `UPDATE` são statements não reconhecidos, e migração de dados no consumidor
-    Django/MySQL carrega dado de paciente. A razão vai para um canal do Slack,
-    então nenhum valor pode entrar nela.
+    `UPDATE` são statements não reconhecidos, e migração de dados carrega dado de
+    paciente — no consumidor Django/MySQL e nas duas bases do consumidor
+    Doctrine, onde metade dos arquivos é migração de dados. A razão vai para um
+    canal do Slack, então nenhum valor pode entrar nela.
 
     São dois cortes porque um valor chega de duas formas. Entre aspas é o caso
     comum. Solto é o que `CALL migrate_subject(12345678900)` faz: sem aspa
@@ -199,11 +200,21 @@ def _echo(raw: str, limit: int = 120) -> str:
     o limiar — `varchar(255)` e `NUMERIC(10,2)` passam inteiros, CPF, CNPJ e id
     não. O que o time de dados precisa ver aqui é o verbo que o classificador
     não entendeu, não o dado que ele carregava.
+
+    **O corte vale para as três aspas, e não só para a simples.** Era só a
+    simples, e o furo é de dialeto: `"..."` delimita identificador no PostgreSQL,
+    mas no MySQL — sem `ANSI_QUOTES`, que é o default — delimita **string**, e
+    `INSERT INTO subjects (name) VALUES ("Maria Silva")` publicava o nome do
+    paciente inteiro. Este módulo atende os dois dialetos ao mesmo tempo e não
+    recebe dica de qual é: das duas leituras possíveis de `"`, ele tem que
+    assumir a perigosa. O preço é o nome do objeto sair do trecho ecoado quando
+    ele estava entre aspas — e o nome do objeto, quando o statement é
+    reconhecido, quem cita é `ref()`, com crase e sem aspa.
     """
     number = _LONG_NUMBER.search(raw)
     cut = min(
         next(
-            (start for kind, start, _ in _spans(raw) if kind == "quoted" and raw[start] == "'"),
+            (start for kind, start, _ in _spans(raw) if kind == "quoted"),
             len(raw),
         ),
         number.start() if number else len(raw),
