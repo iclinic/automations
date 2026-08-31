@@ -55,7 +55,7 @@ from pathlib import Path
 import pytest
 
 import detect
-from detect import alembic, django, history, sql, typeorm
+from detect import alembic, django, doctrine, history, sql, typeorm
 from detect.severity import Severity
 
 CORPUS = Path(__file__).parent / "fixtures" / "corpus"
@@ -677,6 +677,23 @@ class TestTheCorpusReachesEveryTypeormGate:
         assert gate.reason in reasons, name
 
 
+class TestTheCorpusReachesEveryDoctrineGate:
+    """Os cinco portões do `doctrine.py`, alcançados por arquivo em disco.
+
+    `tests/test_doctrine.py` já exercita cada portão com fonte escrita à mão. O
+    que esta classe acrescenta é a mesma exigência do outro lado: a linha tem que
+    ser alcançada **através do dispatch, por um arquivo versionado** — é assim
+    que a QQ-2161 achou `add_key` e `drop_key` sem nenhuma afirmação de
+    severidade na suíte.
+    """
+
+    @pytest.mark.parametrize("name", sorted(doctrine._GATES))
+    def test_the_gate_fires_on_some_fixture(self, name):
+        gate = doctrine._GATES[name]
+        reasons = [f.reason for f in corpus_findings()]
+        assert gate.reason in reasons, name
+
+
 class TestTheCorpusReachesEveryDispatchReason:
     """As cinco razões que o próprio dispatch produz, cada uma por um arquivo."""
 
@@ -696,6 +713,20 @@ class TestTheCorpusReachesEveryDispatchReason:
             (
                 "dispatch/south_style_migration.py",
                 detect.SILENT_PARSER.format(stack="django"),
+            ),
+            # As duas do stack novo. A primeira é o gerador de migrações, que
+            # traz o marcador do Doctrine escrito dentro de um heredoc: o
+            # marcador roda sobre o texto apagado, então ele não casa, e a
+            # resposta é a de dialeto que o pacote não conhece. A segunda é a
+            # migração escrita com o schema builder — parser certo, zero
+            # findings, e o arquivo declara operações.
+            (
+                "dispatch/doctrine_generator.php",
+                detect.UNRECOGNISED.format(stacks="doctrine"),
+            ),
+            (
+                "doctrine/Migrations/pgsql/Version20250201120800.php",
+                detect.SILENT_PARSER.format(stack="doctrine"),
             ),
         ],
     )
