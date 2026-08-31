@@ -1,161 +1,92 @@
+"""Classifica as migrações de um PR e monta o texto do alerta do Slack.
+
+Este arquivo é a borda: lê o ambiente que o `action.yml` monta, chama o
+classificador determinístico de `detect/` e escreve os outputs do step. Ele não
+decide severidade — isso mora nas tabelas dos parsers — e não inventa texto a
+partir do conteúdo da migração.
+
+Até QQ-2152 o miolo daqui era um prompt e uma chamada de API. A GitHub Models
+API foi desligada em 2026-07-30 e o `except Exception` que existia em volta da
+chamada devolvia `controlled` com confiança 0.0 para toda migração, com o job
+verde — quatro semanas do time de dados recebendo a mesma mensagem amarela
+tanto para um `DROP COLUMN` quanto para uma coluna opcional nova. O que
+substituiu a IA lê a fonte com `ast` e tabelas, não tem rede no caminho e diz
+`unknown` quando não sabe.
+"""
+
 import json
 import os
-import time
 
-from openai import OpenAI
+from detect import classify_file
+from detect.severity import (
+    Severity,
+    UnknownSeverity,
+    max_severity,
+    presentation,
+    ref,
+    to_severity,
+)
 from gha_logger import get_logger
-
-# ------------------------------------------------------------------
-# Constantes
-# ------------------------------------------------------------------
-
-SYSTEM_PROMPT = """Você é um analista especialista em migrações de banco de dados.
-Analise os arquivos de migração fornecidos e classifique cada um de acordo com os critérios abaixo.
-
-Critérios de classificação:
-- safe (Safe Change): adição de coluna opcional, nova tabela não consumida, novo valor enum com fallback, novo índice, campo novo na camada analítica.
-- controlled (Mudança Controlada): alterar tamanho de varchar, alterar precisão numérica, tornar campo nullable, alterar valor default.
-- breaking (Breaking Change): remover campo, renomear campo, alterar tipo de dado, alterar chave primária, remover tabela consumida.
-
-Regras:
-1. Inclua TODOS os arquivos fornecidos no array "items", exatamente um objeto por arquivo — mesmo que a classificação seja "none".
-2. Se o arquivo não contiver nenhuma mudança de banco de dados, classifique como "none".
-3. Prefira a classificação mais conservadora quando houver dúvida.
-4. O campo "reason" deve ser uma frase curta em português descrevendo objetivamente a mudança.
-5. O campo "confidence" deve refletir sua certeza (0.0 a 1.0).
-6. O campo "highest_severity" deve refletir a severidade máxima entre todos os arquivos.
-
-Responda SOMENTE com JSON válido neste formato exato, sem nenhum texto extra ou bloco de código markdown:
-{
-    "has_db_change": true,
-    "highest_severity": "breaking",
-    "confidence": 0.95,
-    "items": [
-    {
-        "file": "caminho/arquivo.py",
-        "severity": "breaking",
-        "reason": "Remoção do campo qty na tabela orders"
-    }
-    ]
-}"""
-
-SEVERITY_META: dict[str, tuple[str, str]] = {
-    "safe":       ("🟢", "Safe Change"),
-    "controlled": ("🟡", "Mudança Controlada"),
-    "breaking":   ("🔴", "Breaking Change"),
-    "none":       ("⚪", "Sem alteração de banco"),
-}
-
-MAX_FILE_BYTES = 6000
 
 logger = get_logger(__name__)
 
 
-# ------------------------------------------------------------------
-# Credenciais
-# ------------------------------------------------------------------
-
-
-def resolve_credentials(ai_api_key: str, github_token: str) -> tuple[str, bool]:
-    """Retorna (api_key_a_usar, usando_github_models)."""
-    using_github_models = not bool(ai_api_key)
-    api_key = ai_api_key if ai_api_key else github_token
-    return api_key, using_github_models
+# Razão do item de um arquivo que o parser leu inteiro e sobre o qual não há
+# nada a dizer: `__init__.py` de um pacote `migrations/`, migração de merge, um
+# `.sql` só com `BEGIN; COMMIT;`. Ele continua aparecendo em `items` — é assim
+# que "li e não achei nada" se distingue de "esqueci deste arquivo".
+NOTHING_TO_REPORT = "Nenhuma operação de banco encontrada neste arquivo."
 
 
 # ------------------------------------------------------------------
-# Leitura de arquivos
+# Análise
 # ------------------------------------------------------------------
 
 
-def read_migration_files(files: list[str]) -> dict[str, str]:
-    """Lê os arquivos de migração e retorna {caminho: conteúdo}."""
-    contents: dict[str, str] = {}
+def analyze(files: list[str]) -> dict:
+    """Classifica cada arquivo e agrega o resultado do PR.
+
+    Um item por `Finding`, mais um item `none` para cada arquivo que não rendeu
+    finding nenhum: **todo arquivo recebido aparece em `items`**. Um arquivo que
+    some da saída é indistinguível de um arquivo sem mudança de banco, e essa
+    confusão é a forma original do bug desta entrega.
+
+    A contagem de itens não é comparável entre stacks. `typeorm.py` devolve um
+    finding por statement; `django.py` e `alembic.py` colapsam um `RunSQL` ou um
+    `op.execute` de vários statements num finding só, com `worst()`. A
+    severidade agregada não depende disso — `max_severity` é idempotente —, mas
+    nada aqui pode contar itens para comparar arquivos ou repositórios.
+    """
+    items: list[dict] = []
+
     for path in files:
-        try:
-            with open(path, "r", encoding="utf-8", errors="replace") as fh:
-                content = fh.read(MAX_FILE_BYTES)
-                if len(content) == MAX_FILE_BYTES:
-                    remaining = fh.read(1)
-                    if remaining:
-                        logger.warning(f"  [WARN] {path} truncado em {MAX_FILE_BYTES} bytes")
-            contents[path] = content
-            logger.info(f"  [OK] {path} ({len(content)} chars)")
-        except Exception as exc:
-            contents[path] = f"[Erro ao ler arquivo: {exc}]"
-            logger.warning(f"  [WARN] {path}: {exc}")
-    return contents
+        findings = classify_file(path)
+        logger.info(f"  [OK] {path} — {len(findings)} operação(ões) classificada(s)")
+        if findings:
+            items.extend(
+                {
+                    "file": path,
+                    "severity": finding.severity.value,
+                    "operation": finding.operation,
+                    "reason": finding.reason,
+                }
+                for finding in findings
+            )
+        else:
+            items.append(
+                {
+                    "file": path,
+                    "severity": Severity.NONE.value,
+                    "operation": "",
+                    "reason": NOTHING_TO_REPORT,
+                }
+            )
 
-
-def build_context_block(file_contents: dict[str, str]) -> str:
-    """Formata o bloco de contexto enviado ao modelo."""
-    return "\n\n".join(f"=== {p} ===\n{c}" for p, c in file_contents.items())
-
-
-# ------------------------------------------------------------------
-# Prompt
-# ------------------------------------------------------------------
-
-
-def build_user_prompt(
-    context_block: str,
-    pr_number: str,
-    pr_title: str,
-    repo: str,
-) -> str:
-    return (
-        f"Analise as seguintes migrações de banco de dados:\n\n"
-        f"{context_block}\n\n"
-        f"PR #{pr_number} — {pr_title}\n"
-        f"Repositório: {repo}\n\n"
-        f"Retorne SOMENTE o JSON solicitado."
-    )
-
-
-# ------------------------------------------------------------------
-# Análise via IA
-# ------------------------------------------------------------------
-
-
-def call_ai(client: OpenAI, model: str, user_prompt: str) -> str:
-    """Chama a API e retorna o conteúdo bruto da resposta."""
-    response = client.chat.completions.create(
-        model=model,
-        response_format={"type": "json_object"},
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user",   "content": user_prompt},
-        ],
-        temperature=0.1,
-        max_tokens=1200,
-    )
-    return response.choices[0].message.content.strip()
-
-
-def parse_ai_response(raw: str) -> dict:
-    """Remove envelope markdown opcional e faz parse do JSON."""
-    if raw.startswith("```"):
-        parts = raw.split("```")
-        raw = parts[1] if len(parts) >= 2 else raw
-        if raw.startswith("json"):
-            raw = raw[4:].strip()
-    return json.loads(raw)
-
-
-def make_fallback_result(files: list[str]) -> dict:
-    """Resultado conservador usado quando a chamada à IA falha."""
+    severity = max_severity(item["severity"] for item in items)
     return {
-        "has_db_change": True,
-        "highest_severity": "controlled",
-        "confidence": 0.0,
-        "items": [
-            {
-                "file": f,
-                "severity": "controlled",
-                "reason": "Análise automática falhou — revisão manual necessária",
-            }
-            for f in files
-        ],
+        "has_db_change": severity is not Severity.NONE,
+        "highest_severity": severity.value,
+        "items": items,
     }
 
 
@@ -164,16 +95,30 @@ def make_fallback_result(files: list[str]) -> dict:
 # ------------------------------------------------------------------
 
 
-def apply_confidence_threshold(result: dict, min_conf: float) -> dict:
-    """Promove `safe` → `controlled` quando confiança está abaixo do limiar."""
-    confidence = float(result.get("confidence", 1.0))
-    if confidence < min_conf and result.get("highest_severity") == "safe":
-        result = {**result, "highest_severity": "controlled"}
-        logger.info(
-            f"[INFO] Confiança {confidence:.2f} < {min_conf}"
-            " → promovido de safe para controlled"
-        )
-    return result
+def severity_of(result: dict) -> Severity:
+    """Severidade do resultado, validada contra o vocabulário.
+
+    Estourar é o contrato. `result.get("highest_severity", "none")` era o último
+    lugar onde um resultado incompleto virava um alerta verde: bastava a chave
+    faltar para o PR ser anunciado como "sem alteração de banco".
+
+    Levanta `UnknownSeverity`, como todo o resto do vocabulário. Quem traduz
+    isso em código de saída é o `main()`.
+    """
+    return to_severity(result.get("highest_severity"))
+
+
+def confidence_for(severity: Severity | str) -> float:
+    """Confiança do output para uma severidade já resolvida.
+
+    Num classificador determinístico não existe meio-termo: ou a operação está
+    na tabela do parser, e aí a severidade é a que a tabela diz, ou ela não
+    está, e aí é `unknown`. O campo continua no output só por compatibilidade
+    com quem já lê `confidence` — `1.0` para severidade resolvida, `0.0` para
+    `unknown`, que é o único "não sei" que sobrou. Não há mais promoção de
+    `safe` para `controlled` por limiar: `minimum_confidence` está inerte.
+    """
+    return 0.0 if to_severity(severity) is Severity.UNKNOWN else 1.0
 
 
 def build_slack_text(
@@ -183,19 +128,32 @@ def build_slack_text(
     pr_number: str,
     pr_author: str,
 ) -> str:
-    severity = result.get("highest_severity", "none")
-    emoji, label = SEVERITY_META.get(severity, ("⚪", severity))
+    """Monta a mensagem do Slack.
+
+    Cada item vira uma linha que nomeia o arquivo e a operação antes da razão.
+    O arquivo e a operação existem na linha por causa de `unknown`: "não
+    entendi uma operação" só serve para quem lê se disser em qual arquivo e
+    qual operação. Vale para todas as severidades porque a pergunta "onde?" é a
+    mesma nas cinco.
+
+    Nada aqui inventa texto a partir do conteúdo da migração. Razão e operação
+    chegam prontas dos parsers de `detect/`, que já cortam valores antes de
+    citar um statement — migração de dados carrega CPF de paciente e este texto
+    vai para um canal do Slack.
+    """
+    meta = presentation(severity_of(result))
 
     items = result.get("items") or []
-    reasons = [
-        i["reason"] for i in items if i.get("reason") and i.get("severity") != "none"
+    lines = [
+        f"• {ref(item.get('file') or '')} — {ref(item.get('operation') or '')}: {item['reason']}"
+        for item in items
+        if item.get("reason") and item.get("severity") != Severity.NONE.value
     ]
-    description = "\n• ".join(reasons) if reasons else "Alteração de banco detectada."
-    if reasons:
-        description = "• " + description
+
+    description = "\n".join(lines) if lines else "Alteração de banco detectada."
 
     return (
-        f"{emoji} *{label}* detectada em migração de banco\n"
+        f"{meta.emoji} *{meta.label}* {meta.headline}\n"
         f"*PR:* <{pr_url}|#{pr_number} — {pr_title}> por @{pr_author}\n"
         f"{description}\n"
         f"<{pr_url}|Ver PR para detalhes>"
@@ -222,8 +180,8 @@ def write_github_outputs(
             else:
                 fh.write(f"{key}={value}\n")
 
-        write("has_db_change",    str(result.get("has_db_change", False)).lower())
-        write("highest_severity", result.get("highest_severity", "none"))
+        write("has_db_change",    str(result["has_db_change"]).lower())
+        write("highest_severity", result["highest_severity"])
         write("confidence",       str(confidence))
         write("slack_text",       slack_text)
         write("analysis_json",    json.dumps(result, ensure_ascii=False))
@@ -235,53 +193,34 @@ def write_github_outputs(
 
 
 def main() -> None:
-    ai_api_key   = os.environ.get("AI_API_KEY", "").strip()
-    github_token = os.environ.get("GITHUB_TOKEN", "").strip()
-    api_url = os.environ.get("AI_API_URL", "").strip()
-    model   = os.environ.get("AI_MODEL", "").strip()
-
-    if not api_url:
-        raise SystemExit("[ERRO] AI_API_URL nao configurada.")
-    if not model:
-        raise SystemExit("[ERRO] AI_MODEL nao configurado.")
-
-    api_key, using_github_models = resolve_credentials(ai_api_key, github_token)
-    logger.info(f"==> Provedor de IA: {'GitHub Models API' if using_github_models else 'Hub externo'}")
-    logger.info(f"==> URL: {api_url}  |  Modelo: {model}")
-
-    client = OpenAI(base_url=api_url, api_key=api_key, timeout=30.0)
-
     files_raw = os.environ.get("MIGRATION_FILES", "")
     files = [f.strip() for f in files_raw.split("|") if f.strip()]
 
-    file_contents = read_migration_files(files)
-    context_block = build_context_block(file_contents)
+    # Este step só roda com `has_files == 'true'`. Chegar aqui sem arquivo
+    # significa que a coleta e a classificação discordam, e o único jeito de
+    # terminar seria publicar `none` — um verde que ninguém classificou.
+    if not files:
+        raise SystemExit(
+            "[ERRO] MIGRATION_FILES vazia no step de classificação. "
+            "A coleta disse que havia arquivos de migração e nenhum chegou aqui."
+        )
 
-    user_prompt = build_user_prompt(
-        context_block,
-        pr_number=os.environ.get("PR_NUMBER", ""),
-        pr_title=os.environ.get("PR_TITLE", ""),
-        repo=os.environ.get("REPO", ""),
-    )
+    logger.info(f"==> Classificando {len(files)} arquivo(s) de migração")
 
-    MAX_RETRIES = 2
-    for attempt in range(MAX_RETRIES + 1):
-        try:
-            raw = call_ai(client, model, user_prompt)
-            result = parse_ai_response(raw)
-            logger.info(f"==> Resposta da IA:\n{json.dumps(result, ensure_ascii=False, indent=2)}")
-            break
-        except Exception as exc:
-            if attempt < MAX_RETRIES:
-                logger.warning(f"[WARN] Tentativa {attempt + 1} falhou: {exc}. Retentando...")
-                time.sleep(2)
-            else:
-                logger.error(f"[ERRO] Falha na análise com IA: {exc}")
-                result = make_fallback_result(files)
+    # Sem try/except. Qualquer falha daqui para baixo — leitura, dispatch,
+    # parse, severidade fora da tabela — derruba o step. Era o `except
+    # Exception` com fallback que fazia a GitHub Models API responder 404 por
+    # quatro semanas com o job verde e o Slack recebendo `controlled` para todo
+    # mundo.
+    result = analyze(files)
+    logger.info(f"==> Classificação:\n{json.dumps(result, ensure_ascii=False, indent=2)}")
 
-    min_conf   = float(os.environ.get("MINIMUM_CONFIDENCE", "0.70"))
-    result     = apply_confidence_threshold(result, min_conf)
-    confidence = float(result.get("confidence", 1.0))
+    try:
+        severity = severity_of(result)
+    except UnknownSeverity as exc:
+        raise SystemExit(f"[ERRO] Classificação sem severidade reconhecida: {exc}") from None
+    confidence = confidence_for(severity)
+    result     = {**result, "highest_severity": severity.value, "confidence": confidence}
 
     pr_url    = os.environ.get("PR_URL", "")
     pr_title  = os.environ.get("PR_TITLE", "")

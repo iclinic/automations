@@ -1,41 +1,47 @@
 name: 'Migration Detector'
 author: 'iclinic'
 description: >
-  Detecta arquivos de migração de banco de dados em PRs, classifica o impacto via IA
-  e notifica o time de dados em um canal do Slack.
+  Detecta arquivos de migração de banco de dados em PRs, classifica o impacto com um
+  classificador determinístico e notifica o time de dados em um canal do Slack.
 
 inputs:
   github_token:
     required: true
     description: >
-      Token do GitHub. Usado para ler metadados do PR e, por padrão, como chave de autenticação
-      na GitHub Models API (models.inference.ai.azure.com). Requer permissão `models: read`
-      no workflow quando utilizado como chave de IA.
+      DEPRECADO na prática — a action não lê mais este token. Ele era a credencial da
+      GitHub Models API; a classificação passou a ser determinística e não chama API
+      nenhuma, e os metadados do PR vêm do contexto `github.event.pull_request`, que não
+      precisa de token. A permissão `models: read` deixou de ser necessária no workflow.
+      Continua declarado e obrigatório por uma versão para não quebrar os consumidores
+      que já o passam; tornar-se opcional fica para a remoção dos inputs de IA.
   ai_api_url:
     required: false
-    default: 'https://models.inference.ai.azure.com'
+    default: ''
     description: >
-      URL base da API de IA compatível com OpenAI. Padrão: GitHub Models API.
-      Para uso com hub externo, forneça a URL do serviço e preencha `ai_api_key`.
+      DEPRECADO — inerte desde a classificação determinística. A action não chama mais
+      API de IA. O input continua declarado por uma versão para não quebrar quem já o
+      passa; nenhum valor tem efeito. Pode ser removido do workflow.
   ai_api_key:
     required: false
     default: ''
     description: >
-      Chave de API para o hub externo de IA. Quando vazio (padrão), a action usa o
-      `github_token` contra a GitHub Models API, sem necessidade de secret adicional.
+      DEPRECADO — inerte desde a classificação determinística. A action não chama mais
+      API de IA, então não há chave a fornecer. O input continua declarado por uma versão
+      para não quebrar quem já o passa. Pode ser removido do workflow.
   ai_model:
     required: false
-    default: 'gpt-4o-mini'
+    default: ''
     description: >
-      Nome do modelo de IA a utilizar. Padrão compatível com GitHub Models.
-      Ajuste conforme o modelo disponível no seu hub externo, se aplicável.
+      DEPRECADO — inerte desde a classificação determinística. Não há modelo a escolher.
+      O input continua declarado por uma versão para não quebrar quem já o passa.
+      Pode ser removido do workflow.
   migration_paths:
     required: false
-    default: '**/*.sql,**/migrations/*.py,**/alembic/versions/*.py,**/*AutoMigrate.ts,**/*automigrate.ts'
+    default: '**/*.sql,**/migrations/*.py,**/alembic/versions/*.py,**/*AutoMigrate.ts,**/*automigrate.ts,**/migrations/*.ts'
     description: >
       Globs separados por vírgula para identificar arquivos de migração. Cobre:
       SQL puro, Django (migrations/*.py), Alembic/FastAPI (alembic/versions/*.py)
-      e TypeScript com AutoMigrate.
+      e TypeScript com AutoMigrate ou escrito à mão em migrations/*.ts.
   ignore_name_contains:
     required: false
     default: 'dump'
@@ -56,18 +62,28 @@ inputs:
     required: false
     default: '0.70'
     description: >
-      Limiar mínimo de confiança da IA (0 a 1). Abaixo desse valor, a classificação
-      é promovida para `controlled` por segurança, evitando falsos negativos silenciosos.
+      DEPRECADO — inerte desde a classificação determinística. O input continua declarado
+      para não quebrar quem já o passa, mas nenhum valor tem efeito: não existe mais
+      promoção de `safe` para `controlled` por limiar. Uma operação que o classificador
+      não reconhece agora sai como `unknown`, com emoji e texto próprios no Slack.
+      Pode ser removido do workflow.
 
 outputs:
   has_db_change:
     description: '`true` se ao menos um arquivo de migração com mudança de banco for detectado.'
     value: ${{ steps.set-outputs.outputs.has_db_change }}
   highest_severity:
-    description: 'Severidade máxima encontrada: `safe`, `controlled`, `breaking` ou `none`.'
+    description: >
+      Severidade máxima encontrada: `none`, `safe`, `controlled`, `unknown` ou `breaking`,
+      nessa ordem de gravidade. `unknown` significa que o classificador não entendeu ao
+      menos uma operação do PR — é um pedido de revisão manual, não uma classificação
+      benigna.
     value: ${{ steps.set-outputs.outputs.highest_severity }}
   confidence:
-    description: 'Confiança da classificação retornada pela IA (0 a 1).'
+    description: >
+      DEPRECADO — mantido apenas para quem já lê o output. Num classificador
+      determinístico não há gradação: `0.0` quando `highest_severity` é `unknown`,
+      `1.0` em qualquer outro caso. Use `highest_severity == 'unknown'`.
     value: ${{ steps.set-outputs.outputs.confidence }}
   slack_message_ts:
     description: 'Timestamp da mensagem postada no Slack (disponível apenas com Incoming Webhooks v2+).'
@@ -76,6 +92,36 @@ outputs:
 runs:
   using: composite
   steps:
+
+    # -------------------------------------------------------------------------
+    # 0. Avisa quem ainda passa input de IA
+    #
+    # Os quatro inputs continuam declarados por uma versão para não quebrar
+    # consumidor fora dos três conhecidos. Passar um deles não muda nada e não
+    # derruba nada: só imprime um aviso, para que a remoção na próxima versão
+    # não pegue ninguém de surpresa. Sem `if`, porque quem precisa do aviso é
+    # quem configurou o workflow, e isso independe de o PR ter migração.
+    # -------------------------------------------------------------------------
+    - name: Setup | Warn on deprecated inputs
+      shell: bash
+      env:
+        AI_API_URL: ${{ inputs.ai_api_url }}
+        AI_API_KEY: ${{ inputs.ai_api_key }}
+        AI_MODEL: ${{ inputs.ai_model }}
+        MINIMUM_CONFIDENCE: ${{ inputs.minimum_confidence }}
+      run: |
+        set -euo pipefail
+        warn() {
+          echo "::warning::Input \`$1\` está DEPRECADO e não tem efeito: a classificação é determinística e a action não chama API de IA. Remova-o do workflow."
+        }
+        [[ -n "$AI_API_URL" ]] && warn ai_api_url
+        [[ -n "$AI_API_KEY" ]] && warn ai_api_key
+        [[ -n "$AI_MODEL"   ]] && warn ai_model
+        [[ "$MINIMUM_CONFIDENCE" != "0.70" ]] && warn minimum_confidence
+        # `[[ ... ]] &&` com o teste falso devolve 1, e o último da lista
+        # decidiria o exit code do step inteiro sob `set -e`. Um aviso de
+        # depreciação não pode derrubar o job de ninguém.
+        exit 0
 
     # -------------------------------------------------------------------------
     # 1. Coleta os arquivos de migração alterados no PR
@@ -91,10 +137,12 @@ runs:
         HAS_SLACK_WEBHOOK: ${{ inputs.slack_webhook_url != '' }}
       run: |
         set -euo pipefail
+        # Sem webhook a action não tem para onde avisar. Sair 0 aqui deixava o job
+        # verde sem ter classificado nada e sem ninguém receber mensagem — o mesmo
+        # silêncio que fez a falha da API de IA rodar quatro semanas sem aparecer.
         if [[ "$HAS_SLACK_WEBHOOK" != "true" ]]; then
-          echo "[WARN] SLACK_WEBHOOK_URL não configurada — notificação ignorada."
-          echo "slack_message_ts=" >> "$GITHUB_OUTPUT"
-          exit 0
+          echo "::error::slack_webhook_url não configurada. A action não classifica sem ter para onde notificar."
+          exit 1
         fi
 
         echo "==> Coletando arquivos alterados entre $BASE_SHA e $HEAD_SHA"
@@ -126,7 +174,20 @@ runs:
           #   3. Converte * simples               (* -> [^/]*)
           #   4. Restaura placeholder como .*     (DSTAR -> .*)
           # Sem placeholder, o passo 3 corromperia o .* gerado no passo 2.
-          # NOTE: fragile glob-to-regex — only handles *, **, and literal dots; may break on globs with ?, [], or braces
+          #
+          # A conversão só entende `*`, `**` e ponto literal. `?`, `[]` e `{}`
+          # passavam por ela e viravam outra regex — `**/migrations/[0-9*.py`
+          # vira `.*/migrations/[0-9[^/]*\.py`, que é ERE **válida** e não casa
+          # nada. O step publicava has_files=false e o job terminava verde
+          # dizendo "sem alteração de banco" num PR que dropou coluna. Como
+          # "não casou nada" é indistinguível de "o PR não tem migração", o
+          # portão tem que ser na entrada: metacaractere não suportado é erro
+          # de configuração e falha alto.
+          if [[ "$pattern" == *[][{}?]* ]]; then
+            echo "::error::migration_paths contém metacaractere não suportado (?, [], {}) no glob: $pattern"
+            echo "::error::A conversão glob→regex só entende '*', '**' e ponto literal."
+            exit 1
+          fi
           regex=$(echo "$pattern" \
             | sed 's|\.|\\.|g' \
             | sed 's|\*\*|DSTAR|g' \
@@ -139,7 +200,18 @@ runs:
         INCLUDE_REGEX="${INCLUDE_REGEX%|}"
         echo "==> INCLUDE_REGEX: $INCLUDE_REGEX"
 
-        FILTERED=$(echo "$CHANGED" | grep -E "$INCLUDE_REGEX" || true)
+        # `|| true` aqui confundia "nenhum arquivo bateu" (grep sai 1) com
+        # "a regex é inválida" (grep sai 2+). Com a conversão glob→regex logo
+        # acima, que este arquivo já admite ser frágil, um `migration_paths`
+        # malformado fazia o grep abortar, o step publicar has_files=false e o
+        # job terminar verde dizendo "sem alteração de banco" num PR que
+        # dropou coluna.
+        GREP_RC=0
+        FILTERED=$(echo "$CHANGED" | grep -E "$INCLUDE_REGEX") || GREP_RC=$?
+        if (( GREP_RC > 1 )); then
+          echo "::error::Filtro de inclusão inválido gerado a partir de migration_paths: $INCLUDE_REGEX"
+          exit 1
+        fi
 
         if [[ -z "$FILTERED" ]]; then
           echo "Nenhum arquivo de migração encontrado após filtro de inclusão."
@@ -153,6 +225,12 @@ runs:
           IFS=',' read -ra IGNORE_LIST <<< "$IGNORE_TERMS"
           for term in "${IGNORE_LIST[@]}"; do
             term=$(echo "$term" | xargs)
+            # Termo vazio — de `dump, ` ou `,dump` — vira `grep -Fiv ""`, que
+            # casa toda linha e descarta a lista inteira. Uma vírgula sobrando
+            # no workflow desligava a action em silêncio.
+            if [[ -z "$term" ]]; then
+              continue
+            fi
             FINAL=$(echo "$FINAL" | grep -Fiv "$term" || true)
           done
         fi
@@ -182,56 +260,31 @@ runs:
       with:
         python-version: '3.12'
 
-    # hashFiles() só resolve globs dentro de $GITHUB_WORKSPACE (workspace do
-    # repositório consumidor), portanto não pode referenciar o diretório da
-    # action diretamente. Calculamos o hash via shell, onde $GITHUB_ACTION_PATH
-    # é resolvido corretamente como variável de ambiente de runtime.
-    - name: Setup | Compute requirements hash
-      if: steps.collect.outputs.has_files == 'true'
-      id: req-hash
-      shell: bash
-      run: |
-        set -euo pipefail
-        echo "hash=$(sha256sum "$GITHUB_ACTION_PATH/requirements.txt" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-
-    - name: Setup | Cache pip
-      if: steps.collect.outputs.has_files == 'true'
-      uses: actions/cache@v4
-      with:
-        path: ~/.cache/pip
-        key: migration-detector-pip-${{ steps.req-hash.outputs.hash }}
-
-    - name: Setup | Install openai SDK
-      if: steps.collect.outputs.has_files == 'true'
-      shell: bash
-      run: pip install -r "$GITHUB_ACTION_PATH/requirements.txt" --quiet --disable-pip-version-check
+    # Não há `pip install`. O classificador de `detect/` é só biblioteca padrão,
+    # então o step de análise não tem dependência de rede — que era, além de
+    # lentidão, mais um jeito de o job falhar por motivo alheio à migração. Os
+    # steps de hash do requirements e de cache do pip existiam só para servir
+    # esse install e saíram junto. O `setup-python` fica: o classificador é
+    # Python.
 
     # -------------------------------------------------------------------------
-    # 3. Classifica as migrações com IA e gera o texto para o Slack
+    # 3. Classifica as migrações e gera o texto para o Slack
     #
-    # Provedor primário:  GitHub Models API  (github_token + models: read)
-    #   endpoint: https://models.inference.ai.azure.com
-    #   sem custo adicional, sem secret extra
-    #
-    # Provedor fallback:  Hub externo de IA  (ai_api_key + ai_api_url custom)
-    #   ativado automaticamente quando ai_api_key é fornecido
+    # Determinístico: lê a fonte de cada migração com `ast` e tabelas de
+    # severidade. Sem provedor de IA, sem chave, sem rede. Uma operação que o
+    # classificador não reconhece sai como `unknown` — um pedido de revisão
+    # manual — e nunca como uma classificação benigna.
     # -------------------------------------------------------------------------
-    - name: Analyze | Classify migrations with AI
+    - name: Analyze | Classify migrations
       id: analyze
       if: steps.collect.outputs.has_files == 'true'
       shell: bash
       env:
         MIGRATION_FILES: ${{ steps.collect.outputs.migration_files }}
-        AI_API_URL: ${{ inputs.ai_api_url }}
-        AI_API_KEY: ${{ inputs.ai_api_key }}
-        GITHUB_TOKEN: ${{ inputs.github_token }}
-        AI_MODEL: ${{ inputs.ai_model }}
-        MINIMUM_CONFIDENCE: ${{ inputs.minimum_confidence }}
         PR_URL: ${{ github.event.pull_request.html_url }}
         PR_TITLE: ${{ github.event.pull_request.title }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
         PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-        REPO: ${{ github.repository }}
       run: |
         set -euo pipefail
         python "$GITHUB_ACTION_PATH/classify.py"
@@ -262,9 +315,18 @@ runs:
         CONFIDENCE:       ${{ steps.analyze.outputs.confidence || steps.no-change.outputs.confidence }}
       run: |
         set -euo pipefail
-        echo "has_db_change=${HAS_DB_CHANGE:-false}"      >> "$GITHUB_OUTPUT"
-        echo "highest_severity=${HIGHEST_SEVERITY:-none}" >> "$GITHUB_OUTPUT"
-        echo "confidence=${CONFIDENCE:-1.0}"              >> "$GITHUB_OUTPUT"
+
+        # Último portão. Chegar aqui sem severidade significa que nenhum step
+        # classificou, e o default `none` que ficava neste lugar transformava
+        # isso num job verde dizendo "sem alteração de banco".
+        if [[ -z "${HIGHEST_SEVERITY:-}" || -z "${HAS_DB_CHANGE:-}" || -z "${CONFIDENCE:-}" ]]; then
+          echo "::error::Nenhum step definiu a classificação. O job não termina sem ela."
+          exit 1
+        fi
+
+        echo "has_db_change=${HAS_DB_CHANGE}"       >> "$GITHUB_OUTPUT"
+        echo "highest_severity=${HIGHEST_SEVERITY}" >> "$GITHUB_OUTPUT"
+        echo "confidence=${CONFIDENCE}"             >> "$GITHUB_OUTPUT"
 
     # -------------------------------------------------------------------------
     # 6. Posta notificação no Slack
@@ -294,9 +356,15 @@ runs:
 
         echo "==> Slack HTTP status: $HTTP_STATUS"
 
+        # Webhook rotacionado, revogado, ou canal arquivado devolve 4xx e a
+        # mensagem não chega a ninguém. Deixar isso em [WARN] com o job verde é
+        # a forma original do bug desta entrega: classificou certo, ninguém
+        # ficou sabendo, check verde. Se "sem canal configurado" derruba o step,
+        # "o canal recusou a mensagem" tem que derrubar também.
         if [[ "$HTTP_STATUS" != "200" ]]; then
-          echo "[WARN] Falha ao postar no Slack (status $HTTP_STATUS):"
+          echo "::error::Falha ao postar no Slack (status ${HTTP_STATUS:-sem resposta}). O alerta classificado não chegou ao time de dados."
           cat /tmp/slack_resp.json || true
+          exit 1
         fi
 
         TS=$(python3 -c \
@@ -305,12 +373,23 @@ runs:
         echo "slack_message_ts=${TS}" >> "$GITHUB_OUTPUT"
 
     # -------------------------------------------------------------------------
-    # 7. Sinaliza Breaking Change nos logs (sem falhar a pipeline)
+    # 7. Sinaliza nos checks do PR o que precisa de olho humano
+    #
+    # `unknown` entra junto com `breaking` porque as duas param o merge pelo
+    # mesmo motivo: ninguém do time de dados olhou ainda. Sem isto, "não
+    # entendi esta operação" só existiria no Slack e não deixaria anotação
+    # nenhuma no PR.
     # -------------------------------------------------------------------------
-    - name: Gate | Warn on Breaking Change
-      if: steps.set-outputs.outputs.highest_severity == 'breaking'
+    - name: Gate | Warn on Breaking Change or unknown
+      if: contains(fromJSON('["breaking","unknown"]'), steps.set-outputs.outputs.highest_severity)
       shell: bash
+      env:
+        HIGHEST_SEVERITY: ${{ steps.set-outputs.outputs.highest_severity }}
       run: |
         set -euo pipefail
-        echo "::warning::🔴 Breaking Change detectada em migração de banco de dados."
+        if [[ "$HIGHEST_SEVERITY" == "breaking" ]]; then
+          echo "::warning::🔴 Breaking Change detectada em migração de banco de dados."
+        else
+          echo "::warning::🟠 O classificador não entendeu ao menos uma operação desta migração."
+        fi
         echo "::warning::Aguarde revisão do time de dados antes do merge."
