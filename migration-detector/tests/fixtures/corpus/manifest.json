@@ -1,0 +1,724 @@
+{
+  "alembic/versions/0001_create_signature_table.py": [
+    {
+      "operation": "op.create_table",
+      "reason": "Tabela `docs_signature` criada — tabela nova, ninguém lê ainda.",
+      "severity": "safe"
+    },
+    {
+      "operation": "op.create_index",
+      "reason": "Índice `ix_docs_signature_document_id` criado em `docs_signature`.",
+      "severity": "safe"
+    }
+  ],
+  "alembic/versions/0002_add_external_id.py": [
+    {
+      "operation": "op.add_column",
+      "reason": "Coluna `external_id` adicionada em `docs_signature`.",
+      "severity": "safe"
+    }
+  ],
+  "alembic/versions/0003_constraints.py": [
+    {
+      "operation": "op.create_unique_constraint",
+      "reason": "Constraint UNIQUE `uq_docs_signature_external_id` adicionada em `docs_signature` — linha duplicada já existente impede a migração e gravação duplicada passa a falhar.",
+      "severity": "breaking"
+    },
+    {
+      "operation": "op.create_primary_key",
+      "reason": "Chave primária `pk_docs_signature` criada em `docs_signature` — linha duplicada já existente impede a migração e gravação duplicada passa a falhar.",
+      "severity": "breaking"
+    }
+  ],
+  "alembic/versions/0004_alter_and_rename.py": [
+    {
+      "operation": "op.alter_column",
+      "reason": "Tipo da coluna `document_id` de `docs_signature` alterado — quem lê o tipo antigo quebra.",
+      "severity": "breaking"
+    },
+    {
+      "operation": "op.rename_table",
+      "reason": "Tabela `docs_signature` renomeada — quem lê o nome antigo quebra.",
+      "severity": "breaking"
+    }
+  ],
+  "alembic/versions/0005_drop_index_and_column.py": [
+    {
+      "operation": "op.drop_index",
+      "reason": "Índice `ix_docs_signature_document_id` removido de `docs_signature_v2` — consulta que dependia dele fica mais lenta.",
+      "severity": "controlled"
+    },
+    {
+      "operation": "op.drop_constraint",
+      "reason": "Constraint `uq_docs_signature_external_id` removida de `docs_signature_v2`.",
+      "severity": "controlled"
+    },
+    {
+      "operation": "op.drop_column",
+      "reason": "Coluna `external_id` removida de `docs_signature_v2` — quem lê essa coluna quebra.",
+      "severity": "breaking"
+    }
+  ],
+  "alembic/versions/0006_execute_raw_sql.py": [
+    {
+      "operation": "ADD COLUMN",
+      "reason": "Coluna `checksum` adicionada em `docs_signature_v2`.",
+      "severity": "safe"
+    }
+  ],
+  "alembic/versions/0007_drop_table.py": [
+    {
+      "operation": "op.drop_table",
+      "reason": "Tabela `docs_signature_v2` removida — quem lê essa tabela quebra.",
+      "severity": "breaking"
+    }
+  ],
+  "alembic/versions/0008_execute_dynamic_sql.py": [
+    {
+      "operation": "op.execute",
+      "reason": "SQL montado dinamicamente — o classificador só lê SQL literal, precisa de revisão manual.",
+      "severity": "unknown"
+    }
+  ],
+  "alembic/versions/0009_alter_column_undecidable.py": [
+    {
+      "operation": "op.alter_column",
+      "reason": "Coluna `checksum` de `docs_signature_v2` alterada — o classificador não conhece a definição anterior, precisa de revisão manual.",
+      "severity": "unknown"
+    }
+  ],
+  "alembic/versions/0010_index_name_helper.py": [
+    {
+      "operation": "op.f",
+      "reason": "Helper `op.f()` de nome de índice — não altera schema.",
+      "severity": "none"
+    },
+    {
+      "operation": "op.create_index",
+      "reason": "Índice `ix_docs_signature_checksum` criado em `docs_signature_v2`.",
+      "severity": "safe"
+    }
+  ],
+  "alembic/versions/__init__.py": [],
+  "dispatch/activerecord_style_migration.rb": [
+    {
+      "operation": "Arquivo",
+      "reason": "Extensão `.rb` não tem classificador — o arquivo casou `migration_paths` mas nenhum parser lê esse formato — precisa de revisão manual.",
+      "severity": "unknown"
+    }
+  ],
+  "dispatch/ambiguous_django_and_alembic.py": [
+    {
+      "operation": "Arquivo",
+      "reason": "O arquivo define `Migration` e `upgrade` ao mesmo tempo — o classificador não sabe se é Django ou Alembic — precisa de revisão manual.",
+      "severity": "unknown"
+    }
+  ],
+  "dispatch/broken_syntax_migration.py": [
+    {
+      "operation": "Arquivo",
+      "reason": "Arquivo não é Python válido — o classificador não leu as operações — precisa de revisão manual.",
+      "severity": "unknown"
+    }
+  ],
+  "dispatch/not_a_migration.py": [],
+  "dispatch/south_style_migration.py": [
+    {
+      "operation": "Arquivo",
+      "reason": "O arquivo declara operações que o classificador de django não leu — precisa de revisão manual.",
+      "severity": "unknown"
+    }
+  ],
+  "dispatch/yoyo_style_migration.py": [
+    {
+      "operation": "Arquivo",
+      "reason": "O arquivo casou `migration_paths` e declara operações, mas não é uma migração de django nem alembic — o classificador não conhece este formato — precisa de revisão manual.",
+      "severity": "unknown"
+    }
+  ],
+  "django/bookings/migrations/0001_initial.py": [
+    {
+      "operation": "CreateModel",
+      "reason": "Modelo `Booking` criado — tabela nova, ninguém lê ainda.",
+      "severity": "safe"
+    }
+  ],
+  "django/bookings/migrations/0030_add_external_id_and_index.py": [
+    {
+      "operation": "AddField",
+      "reason": "Campo `external_id` adicionado em `booking`.",
+      "severity": "safe"
+    },
+    {
+      "operation": "AddIndex",
+      "reason": "Índice adicionado em `booking`.",
+      "severity": "safe"
+    }
+  ],
+  "django/bookings/migrations/0034_modify_external_id_to_non_null.py": [
+    {
+      "operation": "RunPython",
+      "reason": "Migração de dados em Python — o classificador não lê o que a função faz. Confirmar o volume e o impacto com o time de dados.",
+      "severity": "controlled"
+    },
+    {
+      "operation": "AlterField",
+      "reason": "Campo `external_id` de `booking` passou a NOT NULL — linha com valor nulo impede a migração e gravação sem valor passa a falhar.",
+      "severity": "breaking"
+    }
+  ],
+  "django/bookings/migrations/__init__.py": [],
+  "django/catalog/migrations/0001_initial.py": [
+    {
+      "operation": "CreateModel",
+      "reason": "Modelo `Item` criado — tabela nova, ninguém lê ainda.",
+      "severity": "safe"
+    },
+    {
+      "operation": "CreateModel",
+      "reason": "Modelo `Bundle` criado — tabela nova, ninguém lê ainda.",
+      "severity": "safe"
+    },
+    {
+      "operation": "CreateModel",
+      "reason": "Modelo `Legacy` criado — tabela nova, ninguém lê ainda.",
+      "severity": "safe"
+    }
+  ],
+  "django/catalog/migrations/0002_add_and_remove_fields.py": [
+    {
+      "operation": "AddField",
+      "reason": "Campo `barcode` adicionado em `item`.",
+      "severity": "safe"
+    },
+    {
+      "operation": "AddField",
+      "reason": "Campo `stock` adicionado em `item` como NOT NULL sem default — tabela que já tem linha impede a migração.",
+      "severity": "controlled"
+    },
+    {
+      "operation": "RemoveField",
+      "reason": "Campo `notes` removido de `item` — quem lê essa coluna quebra.",
+      "severity": "breaking"
+    }
+  ],
+  "django/catalog/migrations/0003_rename_model_and_field.py": [
+    {
+      "operation": "RenameModel",
+      "reason": "Modelo `Legacy` renomeado — quem lê o nome antigo quebra.",
+      "severity": "breaking"
+    },
+    {
+      "operation": "RenameField",
+      "reason": "Campo `label` de `item` renomeado — quem lê o nome antigo quebra.",
+      "severity": "breaking"
+    }
+  ],
+  "django/catalog/migrations/0004_indexes_and_constraints.py": [
+    {
+      "operation": "AddIndex",
+      "reason": "Índice adicionado em `item`.",
+      "severity": "safe"
+    },
+    {
+      "operation": "RemoveIndex",
+      "reason": "Índice `item_sku_idx` removido de `item` — consulta que dependia dele fica mais lenta.",
+      "severity": "controlled"
+    },
+    {
+      "operation": "AddConstraint",
+      "reason": "Constraint adicionada em `item`.",
+      "severity": "controlled"
+    },
+    {
+      "operation": "RemoveConstraint",
+      "reason": "Constraint `item_stock_non_negative` removida de `item`.",
+      "severity": "controlled"
+    }
+  ],
+  "django/catalog/migrations/0005_model_options.py": [
+    {
+      "operation": "AlterModelOptions",
+      "reason": "Opções do modelo `item` alteradas — metadado do Django, não altera schema.",
+      "severity": "none"
+    },
+    {
+      "operation": "AlterOrderWithRespectTo",
+      "reason": "Ordenação de `bundle` passou a depender de `slug` — o Django cria a coluna `_order` e a preenche.",
+      "severity": "controlled"
+    }
+  ],
+  "django/catalog/migrations/0006_backfill_titles.py": [
+    {
+      "operation": "RunPython",
+      "reason": "Migração de dados em Python — o classificador não lê o que a função faz. Confirmar o volume e o impacto com o time de dados.",
+      "severity": "controlled"
+    }
+  ],
+  "django/catalog/migrations/0007_raw_sql_static.py": [
+    {
+      "operation": "DROP COLUMN",
+      "reason": "Coluna `barcode` removida de `catalog_item` — quem lê essa coluna quebra.",
+      "severity": "breaking"
+    }
+  ],
+  "django/catalog/migrations/0008_alter_unique_together.py": [
+    {
+      "operation": "AlterUniqueTogether",
+      "reason": "Meta `unique_together` de `item` passou a exigir combinação única — linha duplicada já existente impede a migração e gravação duplicada passa a falhar.",
+      "severity": "breaking"
+    }
+  ],
+  "django/catalog/migrations/0009_delete_model.py": [
+    {
+      "operation": "DeleteModel",
+      "reason": "Modelo `Archive` removido — quem lê essa tabela quebra.",
+      "severity": "breaking"
+    }
+  ],
+  "django/catalog/migrations/0010_merge_20260101_0000.py": [],
+  "django/catalog/migrations/0011_alter_field_shortens_column.py": [
+    {
+      "operation": "AlterField",
+      "reason": "Campo `sku` de `item` encurtou de `64` para `16` — valor mais longo que o novo limite impede a migração.",
+      "severity": "breaking"
+    }
+  ],
+  "django/catalog/migrations/0012_alter_field_help_text_only.py": [
+    {
+      "operation": "AlterField",
+      "reason": "Campo `sku` de `item` alterado sem DDL — a diferença fica no estado do Django e não chega ao banco.",
+      "severity": "none"
+    }
+  ],
+  "django/catalog/migrations/__init__.py": [],
+  "django/ledger/migrations/0001_initial.py": [
+    {
+      "operation": "CreateModel",
+      "reason": "Modelo `Supplier` criado — tabela nova, ninguém lê ainda.",
+      "severity": "safe"
+    },
+    {
+      "operation": "CreateModel",
+      "reason": "Modelo `SupplierService` criado — tabela nova, ninguém lê ainda.",
+      "severity": "safe"
+    }
+  ],
+  "django/ledger/migrations/0037_adds_external_id.py": [
+    {
+      "operation": "AddField",
+      "reason": "Campo `external_id` adicionado em `supplier`.",
+      "severity": "safe"
+    },
+    {
+      "operation": "AddField",
+      "reason": "Campo `external_id` adicionado em `supplierservice`.",
+      "severity": "safe"
+    },
+    {
+      "operation": "AddConstraint",
+      "reason": "Constraint UNIQUE adicionada em `supplier` — linha duplicada já existente impede a migração e gravação duplicada passa a falhar.",
+      "severity": "breaking"
+    }
+  ],
+  "django/ledger/migrations/0042_modify_supplier_external_id_to_non_null.py": [
+    {
+      "operation": "MODIFY ... NOT NULL",
+      "reason": "Coluna `external_id` de `ledger_supplier` passou a NOT NULL — insert sem valor passa a falhar.",
+      "severity": "breaking"
+    },
+    {
+      "operation": "AlterField",
+      "reason": "Campo `external_id` de `supplier` passou a NOT NULL — linha com valor nulo impede a migração e gravação sem valor passa a falhar.",
+      "severity": "breaking"
+    }
+  ],
+  "django/ledger/migrations/0043_modify_supplierservice_external_id_to_non_null.py": [
+    {
+      "operation": "MODIFY ... NOT NULL",
+      "reason": "Coluna `external_id` de `ledger_supplierservice` passou a NOT NULL — insert sem valor passa a falhar.",
+      "severity": "breaking"
+    },
+    {
+      "operation": "AlterField",
+      "reason": "Campo `external_id` de `supplierservice` passou a NOT NULL — linha com valor nulo impede a migração e gravação sem valor passa a falhar.",
+      "severity": "breaking"
+    }
+  ],
+  "django/ledger/migrations/__init__.py": [],
+  "django/residue/migrations/0001_alter_field_without_prior_state.py": [
+    {
+      "operation": "AlterField",
+      "reason": "Campo `code` de `orphan` alterado — o classificador não conhece a definição anterior, precisa de revisão manual.",
+      "severity": "unknown"
+    }
+  ],
+  "django/residue/migrations/0002_alter_unique_together_opaque.py": [
+    {
+      "operation": "AlterUniqueTogether",
+      "reason": "Meta `unique_together` de `orphan` definida por um valor que o classificador não consegue ler — precisa de revisão manual.",
+      "severity": "unknown"
+    }
+  ],
+  "django/residue/migrations/0003_run_sql_dynamic.py": [
+    {
+      "operation": "RunSQL",
+      "reason": "SQL montado dinamicamente — o classificador só lê SQL literal, precisa de revisão manual.",
+      "severity": "unknown"
+    }
+  ],
+  "django/residue/migrations/0004_separate_database_and_state_non_literal.py": [
+    {
+      "operation": "SeparateDatabaseAndState",
+      "reason": "Ramo `state_operations` de SeparateDatabaseAndState não é uma lista literal — precisa de revisão manual.",
+      "severity": "unknown"
+    }
+  ],
+  "django/residue/migrations/__init__.py": [],
+  "django/subjects/migrations/0001_initial.py": [
+    {
+      "operation": "CreateModel",
+      "reason": "Modelo `Subject` criado — tabela nova, ninguém lê ainda.",
+      "severity": "safe"
+    }
+  ],
+  "django/subjects/migrations/0022_add_external_id.py": [
+    {
+      "operation": "AddField",
+      "reason": "Campo `external_id` adicionado em `subject`.",
+      "severity": "safe"
+    }
+  ],
+  "django/subjects/migrations/0027_modify_external_id_to_non_null.py": [
+    {
+      "operation": "RunPython",
+      "reason": "Migração de dados em Python — o classificador não lê o que a função faz. Confirmar o volume e o impacto com o time de dados.",
+      "severity": "controlled"
+    },
+    {
+      "operation": "AlterField",
+      "reason": "Campo `external_id` de `subject` passou a NOT NULL — linha com valor nulo impede a migração e gravação sem valor passa a falhar.",
+      "severity": "breaking"
+    }
+  ],
+  "django/subjects/migrations/__init__.py": [],
+  "sql/0001_create_objects.sql": [
+    {
+      "operation": "BEGIN",
+      "reason": "Controle de transação — não altera schema.",
+      "severity": "none"
+    },
+    {
+      "operation": "SET",
+      "reason": "Ajuste de sessão — não altera schema.",
+      "severity": "none"
+    },
+    {
+      "operation": "CREATE SEQUENCE",
+      "reason": "Sequence `ledger_entry_id_seq` criada.",
+      "severity": "safe"
+    },
+    {
+      "operation": "CREATE TYPE",
+      "reason": "Tipo `ledger_kind` criado.",
+      "severity": "safe"
+    },
+    {
+      "operation": "CREATE TABLE",
+      "reason": "Tabela `ledger_entry` criada.",
+      "severity": "safe"
+    },
+    {
+      "operation": "CREATE INDEX",
+      "reason": "Índice criado em `ledger_entry`.",
+      "severity": "safe"
+    },
+    {
+      "operation": "CREATE UNIQUE INDEX",
+      "reason": "Índice único criado em `ledger_entry` — linha duplicada já existente impede a migração e gravação duplicada passa a falhar.",
+      "severity": "breaking"
+    },
+    {
+      "operation": "COMMENT ON",
+      "reason": "Comentário de metadado — não altera schema.",
+      "severity": "none"
+    },
+    {
+      "operation": "COMMIT",
+      "reason": "Controle de transação — não altera schema.",
+      "severity": "none"
+    }
+  ],
+  "sql/0002_alter_table_postgres.sql": [
+    {
+      "operation": "ADD CONSTRAINT",
+      "reason": "Constraint adicionada em `ledger_entry`.",
+      "severity": "controlled"
+    },
+    {
+      "operation": "ADD CONSTRAINT ... UNIQUE",
+      "reason": "Constraint UNIQUE adicionada em `ledger_entry` — linha duplicada já existente impede a migração e gravação duplicada passa a falhar.",
+      "severity": "breaking"
+    },
+    {
+      "operation": "ADD COLUMN",
+      "reason": "Coluna `memo` adicionada em `ledger_entry`.",
+      "severity": "safe"
+    },
+    {
+      "operation": "ADD COLUMN",
+      "reason": "Coluna `owner_id` adicionada em `ledger_entry` como NOT NULL sem DEFAULT — tabela que já tem linha impede a migração.",
+      "severity": "controlled"
+    },
+    {
+      "operation": "ALTER COLUMN ... SET NOT NULL",
+      "reason": "Coluna `label` de `ledger_entry` passou a NOT NULL — insert sem valor passa a falhar.",
+      "severity": "breaking"
+    },
+    {
+      "operation": "ALTER COLUMN ... DROP NOT NULL",
+      "reason": "Coluna `label` de `ledger_entry` passou a aceitar NULL.",
+      "severity": "controlled"
+    },
+    {
+      "operation": "ALTER COLUMN ... TYPE",
+      "reason": "Tipo da coluna `label` de `ledger_entry` alterado — quem lê o tipo antigo quebra.",
+      "severity": "breaking"
+    },
+    {
+      "operation": "ALTER COLUMN ... SET DEFAULT",
+      "reason": "Default da coluna `label` de `ledger_entry` alterado.",
+      "severity": "controlled"
+    },
+    {
+      "operation": "ALTER COLUMN ... DROP DEFAULT",
+      "reason": "Default da coluna `label` de `ledger_entry` alterado.",
+      "severity": "controlled"
+    },
+    {
+      "operation": "DROP CONSTRAINT",
+      "reason": "Constraint removida de `ledger_entry`.",
+      "severity": "controlled"
+    },
+    {
+      "operation": "DROP COLUMN",
+      "reason": "Coluna `memo` removida de `ledger_entry` — quem lê essa coluna quebra.",
+      "severity": "breaking"
+    },
+    {
+      "operation": "RENAME COLUMN",
+      "reason": "Coluna `label` de `ledger_entry` renomeada — quem lê o nome antigo quebra.",
+      "severity": "breaking"
+    },
+    {
+      "operation": "RENAME TO",
+      "reason": "Tabela `ledger_entry` renomeada — quem lê o nome antigo quebra.",
+      "severity": "breaking"
+    }
+  ],
+  "sql/0003_alter_table_mysql.sql": [
+    {
+      "operation": "ADD PRIMARY KEY",
+      "reason": "Constraint adicionada em `ledger_entry_v2`.",
+      "severity": "controlled"
+    },
+    {
+      "operation": "ADD INDEX",
+      "reason": "Índice adicionado em `ledger_entry_v2`.",
+      "severity": "safe"
+    },
+    {
+      "operation": "ADD UNIQUE INDEX",
+      "reason": "Índice único adicionado em `ledger_entry_v2` — linha duplicada já existente impede a migração e gravação duplicada passa a falhar.",
+      "severity": "breaking"
+    },
+    {
+      "operation": "DROP KEY",
+      "reason": "Índice ou chave removido de `ledger_entry_v2`.",
+      "severity": "controlled"
+    },
+    {
+      "operation": "MODIFY",
+      "reason": "Tipo da coluna `title` de `ledger_entry_v2` alterado — quem lê o tipo antigo quebra.",
+      "severity": "breaking"
+    },
+    {
+      "operation": "MODIFY ... NOT NULL",
+      "reason": "Coluna `owner_id` de `ledger_entry_v2` passou a NOT NULL — insert sem valor passa a falhar.",
+      "severity": "breaking"
+    },
+    {
+      "operation": "CHANGE",
+      "reason": "Coluna `title` de `ledger_entry_v2` renomeada e redefinida — quem lê o nome antigo quebra.",
+      "severity": "breaking"
+    }
+  ],
+  "sql/0004_drop_objects.sql": [
+    {
+      "operation": "DROP INDEX",
+      "reason": "Índice `ledger_entry_id_uidx` removido — consulta que dependia dele fica mais lenta.",
+      "severity": "controlled"
+    },
+    {
+      "operation": "DROP TABLE",
+      "reason": "Tabela `ledger_entry_v2` removida — quem lê essa tabela quebra.",
+      "severity": "breaking"
+    },
+    {
+      "operation": "DROP TYPE",
+      "reason": "Tipo `ledger_kind` removido — coluna que ainda usa esse tipo impede a migração.",
+      "severity": "controlled"
+    }
+  ],
+  "sql/0005_alter_type_add_value.sql": [
+    {
+      "operation": "ALTER TYPE ... ADD VALUE",
+      "reason": "Novo valor adicionado ao enum `ledger_kind`.",
+      "severity": "safe"
+    }
+  ],
+  "sql/0006_alter_type_rename.sql": [
+    {
+      "operation": "ALTER TYPE",
+      "reason": "ALTER TYPE em `ledger_kind` que não é ADD VALUE — precisa de revisão manual.",
+      "severity": "unknown"
+    }
+  ],
+  "sql/0007_transaction_only.sql": [
+    {
+      "operation": "BEGIN",
+      "reason": "Controle de transação — não altera schema.",
+      "severity": "none"
+    },
+    {
+      "operation": "COMMIT",
+      "reason": "Controle de transação — não altera schema.",
+      "severity": "none"
+    }
+  ],
+  "sql/0008_unrecognised_verb.sql": [
+    {
+      "operation": "VACUUM",
+      "reason": "Statement não reconhecido pelo classificador: VACUUM FULL ledger_entry — precisa de revisão manual.",
+      "severity": "unknown"
+    }
+  ],
+  "sql/0009_alter_column_action_unrecognised.sql": [
+    {
+      "operation": "ALTER COLUMN",
+      "reason": "Ação de ALTER COLUMN não reconhecida sobre `label` de `ledger_entry` — precisa de revisão manual.",
+      "severity": "unknown"
+    }
+  ],
+  "typeorm/migrations/1700000000001-CreateSchedule.ts": [
+    {
+      "operation": "CREATE TABLE",
+      "reason": "Tabela `schedule` criada.",
+      "severity": "safe"
+    },
+    {
+      "operation": "CREATE INDEX",
+      "reason": "Índice criado em `schedule`.",
+      "severity": "safe"
+    }
+  ],
+  "typeorm/migrations/1700000000002-AddColumns.ts": [
+    {
+      "operation": "ADD COLUMN",
+      "reason": "Coluna `notes` adicionada em `schedule`.",
+      "severity": "safe"
+    },
+    {
+      "operation": "ADD COLUMN",
+      "reason": "Coluna `seats` adicionada em `schedule` como NOT NULL sem DEFAULT — tabela que já tem linha impede a migração.",
+      "severity": "controlled"
+    }
+  ],
+  "typeorm/migrations/1700000000003-DropColumn.ts": [
+    {
+      "operation": "DROP COLUMN",
+      "reason": "Coluna `notes` removida de `schedule` — quem lê essa coluna quebra.",
+      "severity": "breaking"
+    }
+  ],
+  "typeorm/migrations/1700000000004-EnumRewrite.ts": [
+    {
+      "operation": "ALTER TYPE",
+      "reason": "ALTER TYPE em `public.schedule_status_enum` que não é ADD VALUE — precisa de revisão manual.",
+      "severity": "unknown"
+    },
+    {
+      "operation": "CREATE TYPE",
+      "reason": "Tipo `schedule_status_enum` criado.",
+      "severity": "safe"
+    },
+    {
+      "operation": "ALTER COLUMN ... DROP DEFAULT",
+      "reason": "Default da coluna `status` de `schedule` alterado.",
+      "severity": "controlled"
+    },
+    {
+      "operation": "ALTER COLUMN ... TYPE",
+      "reason": "Tipo da coluna `status` de `schedule` alterado — quem lê o tipo antigo quebra.",
+      "severity": "breaking"
+    },
+    {
+      "operation": "ALTER COLUMN ... SET DEFAULT",
+      "reason": "Default da coluna `status` de `schedule` alterado.",
+      "severity": "controlled"
+    },
+    {
+      "operation": "DROP TYPE",
+      "reason": "Tipo `schedule_status_enum_old` removido — coluna que ainda usa esse tipo impede a migração.",
+      "severity": "controlled"
+    }
+  ],
+  "typeorm/migrations/1700000000005-UniqueIndex.ts": [
+    {
+      "operation": "CREATE UNIQUE INDEX",
+      "reason": "Índice único criado em `schedule` — linha duplicada já existente impede a migração e gravação duplicada passa a falhar.",
+      "severity": "breaking"
+    },
+    {
+      "operation": "DROP INDEX",
+      "reason": "Índice `IDX_schedule_room` removido — consulta que dependia dele fica mais lenta.",
+      "severity": "controlled"
+    }
+  ],
+  "typeorm/migrations/1700000000006-DynamicSql.ts": [
+    {
+      "operation": "queryRunner.query",
+      "reason": "SQL montado dinamicamente — o classificador só lê SQL literal, precisa de revisão manual.",
+      "severity": "unknown"
+    }
+  ],
+  "typeorm/migrations/1700000000007-UnreadSql.ts": [
+    {
+      "operation": "queryRunner.query",
+      "reason": "SQL escrito fora de uma template string — o classificador só lê o SQL que está entre crases no corpo de `up()`, precisa de revisão manual.",
+      "severity": "unknown"
+    }
+  ],
+  "typeorm/migrations/1700000000008-EmptyUp.ts": [
+    {
+      "operation": "queryRunner.query",
+      "reason": "Chamada `queryRunner.query()` sem SQL a executar — não altera schema.",
+      "severity": "none"
+    }
+  ],
+  "typeorm/migrations/1700000000009-AmbiguousUp.ts": [
+    {
+      "operation": "up",
+      "reason": "O arquivo define `up()` mais de uma vez e o classificador não sabe qual roda — precisa de revisão manual.",
+      "severity": "unknown"
+    }
+  ],
+  "typeorm/migrations/1700000000010-UnterminatedUp.ts": [
+    {
+      "operation": "up",
+      "reason": "O corpo de `up()` não fecha e o classificador não delimitou os statements — precisa de revisão manual.",
+      "severity": "unknown"
+    }
+  ],
+  "typeorm/migrations/index.ts": []
+}

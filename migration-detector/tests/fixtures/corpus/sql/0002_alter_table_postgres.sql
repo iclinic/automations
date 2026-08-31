@@ -1,0 +1,13 @@
+ALTER TABLE ledger_entry ADD CONSTRAINT ledger_entry_pk PRIMARY KEY (id);
+ALTER TABLE ledger_entry ADD CONSTRAINT ledger_entry_label_uq UNIQUE (label);
+ALTER TABLE ledger_entry ADD COLUMN memo varchar(255) NULL;
+ALTER TABLE ledger_entry ADD COLUMN owner_id bigint NOT NULL;
+ALTER TABLE ledger_entry ALTER COLUMN label SET NOT NULL;
+ALTER TABLE ledger_entry ALTER COLUMN label DROP NOT NULL;
+ALTER TABLE ledger_entry ALTER COLUMN label TYPE varchar(240);
+ALTER TABLE ledger_entry ALTER COLUMN label SET DEFAULT '';
+ALTER TABLE ledger_entry ALTER COLUMN label DROP DEFAULT;
+ALTER TABLE ledger_entry DROP CONSTRAINT ledger_entry_label_uq;
+ALTER TABLE ledger_entry DROP COLUMN memo;
+ALTER TABLE ledger_entry RENAME COLUMN label TO title;
+ALTER TABLE ledger_entry RENAME TO ledger_entry_v2;

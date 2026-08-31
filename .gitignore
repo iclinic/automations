@@ -74,3 +74,10 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# Mapa real<->sintético das fixtures do migration-detector.
+# `iclinic/automations` é público e as fixtures do corpus são sintéticas de
+# propósito; o mapa que amarra cada uma ao arquivo real que ela reproduz mora
+# fora do repositório, e `tests/test_corpus.py` pula o que depende dele quando
+# não está presente.
+migration-detector/tests/fixtures/.identifier-map.json
