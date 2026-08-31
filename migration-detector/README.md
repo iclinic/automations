@@ -38,6 +38,9 @@ O custo é um PR de uma linha em cada consumidor, trocando a major fixada por
 > A tag `@v5` só existe depois da Release. Até lá, quem quiser exercitar esta
 > versão aponta para a branch.
 
+São quatro stacks suportadas; o workflow do consumidor Doctrine/PHP é um PR no
+repositório dele e entra depois desta action.
+
 A janela aberta entre QQ-2159 e QQ-2160 está fechada: o classificador
 determinístico de `detect/` está ligado no lugar da chamada de IA, que falhava
 em toda migração desde que a GitHub Models API foi desligada em 2026-07-30.
@@ -46,7 +49,7 @@ em toda migração desde que a GitHub Models API foi desligada em 2026-07-30.
 
 1. A action é disparada em eventos de `pull_request`.
 2. Um script shell coleta os arquivos alterados no PR e filtra possíveis migrações/DDL.
-3. Um script Python lê cada arquivo e o encaminha ao parser do seu stack (SQL, Django, Alembic ou TypeORM).
+3. Um script Python lê cada arquivo e o encaminha ao parser do seu stack (SQL, Django, Alembic, TypeORM ou Doctrine).
 4. O parser classifica cada operação por severidade, com justificativa, a partir de tabelas — sem rede e sem modelo.
 5. A action publica o resultado em um canal do Slack com breve descrição e link do PR.
 6. A action pode falhar o job em caso de `Breaking Change`.
@@ -133,6 +136,18 @@ Os globs padrão de `migration_paths`, um por stack suportado:
 - Migrações Alembic/FastAPI (`**/alembic/versions/*.py`)
 - Migrações TypeORM (`**/migrations/*.ts`, mais `**/*AutoMigrate.ts` e
   `**/*automigrate.ts`, que é como o consumidor TypeORM nomeia as dele)
+- Migrações Doctrine, em PHP (`**/Migrations/*/Version20*.php`)
+
+O glob do Doctrine tem duas particularidades, e as duas são deliberadas. O `*` do
+meio é o **diretório do banco**: o consumidor tem duas bases, cada uma com o seu
+`migrations_path`, e nomear os dois diretórios deixaria uma terceira base futura
+fora do alerta sem que nada falhasse. O `20` depois de `Version` é o prefixo do
+ano do timestamp que o Doctrine usa no nome do arquivo, e existe para deixar de
+fora o `VersionHelper.php` do runner do consumidor, que casaria
+`Migrations/*/Version*.php`. Recortar isso com uma classe de caractere seria mais
+claro, mas a conversão glob→regex do step `Collect` só entende `*`, `**` e ponto
+literal — qualquer outro metacaractere é erro de configuração e falha o step por
+decisão.
 
 ### Exclusões obrigatórias
 
@@ -198,7 +213,7 @@ ficou mais curta; e todo índice ou constraint **único** novo
 UNIQUE`, `unique_together` que passou a exigir combinação nova). O índice único
 não quebra quem lê, mas quebra quem grava: a migração falha se a tabela já tem
 duplicata, e o `INSERT` que antes passava passa a estourar. É a mesma severidade
-nos quatro parsers, porque a mesma mudança não pode sair com duas cores conforme
+nos cinco parsers, porque a mesma mudança não pode sair com duas cores conforme
 o stack.
 
 ### `unknown` não é uma classificação benigna
@@ -223,8 +238,12 @@ Sai `unknown`:
 - `AddField` cujo campo recebe `**kwargs`, ou `unique`/`primary_key` que não é
   literal;
 - verbo ou ação de SQL que o parser não reconhece, incluindo
-  `ALTER TYPE ... RENAME`;
-- os quatro casos em que o dispatch não sabe a quem entregar o arquivo, na
+  `ALTER TYPE ... RENAME` e os verbos de DML — `INSERT`, `UPDATE`, `DELETE` —,
+  que é o que faz uma migração de dados escrita em SQL cru sair `unknown` em
+  qualquer stack;
+- `$this->addSql()` do Doctrine cujo primeiro argumento está numa das duas
+  sintaxes de string do PHP que interpolam, ou não é um literal inteiro;
+- os cinco casos em que o dispatch não sabe a quem entregar o arquivo, na
   seção [Classificador determinístico](#classificador-determinístico);
 - arquivo do diff com cara de migração — sob `migrations/` ou
   `alembic/versions/`, ou com nome prefixado por timestamp — que nenhum padrão
@@ -238,9 +257,9 @@ honesto vale mais que um palpite confiante, e foi exatamente o palpite
 confiante — quatro semanas de `controlled` com confiança 0.0 para toda migração —
 que motivou esta entrega.
 
-### Os três stacks, e o SQL que atravessa todos
+### Os quatro stacks, e o SQL que atravessa todos
 
-Cada um dos três repositórios consumidores escreve migração de um jeito, e cada
+Cada um dos quatro repositórios consumidores escreve migração de um jeito, e cada
 um tem um parser:
 
 | Consumidor | Stack | Onde as migrações moram | Parser |
@@ -248,11 +267,12 @@ um tem um parser:
 | Django/MySQL | Django | `django/app/*/migrations/*.py` | `detect/django.py` (+ `detect/history.py`) |
 | Alembic/PostgreSQL | Alembic | `**/versions/*.py` | `detect/alembic.py` |
 | TypeORM/PostgreSQL | TypeORM | `migrations/*.ts` | `detect/typeorm.py` |
+| Doctrine/PHP | Doctrine Migrations | `Migrations/<banco>/Version*.php` | `detect/doctrine.py` |
 
-`detect/sql.py` é o quarto parser e não tem repositório próprio: ele lê os
-`**/*.sql` soltos e é para onde os outros três delegam quando encontram SQL
-literal dentro de um `RunSQL`, de um `op.execute` ou de um
-`queryRunner.query`. É por isso que um `DROP COLUMN` escrito à mão dentro de uma
+`detect/sql.py` é o quinto parser e não tem repositório próprio: ele lê os
+`**/*.sql` soltos e é para onde os outros quatro delegam quando encontram SQL
+literal dentro de um `RunSQL`, de um `op.execute`, de um `queryRunner.query` ou
+de um `$this->addSql`. É por isso que um `DROP COLUMN` escrito à mão dentro de uma
 migração do Django sai com a mesma severidade que o `RemoveField` equivalente.
 
 O Django é o único que precisa de mais que o arquivo: `detect/history.py`
@@ -260,6 +280,47 @@ reconstrói o estado do app anterior à migração lendo os ancestrais no diret�
 `migrations/`. Sem esse estado, `AlterField` — a operação mais comum do corpus —
 sai `unknown`, porque a definição nova sozinha não diz o que mudou. Daí o
 `fetch-depth: 0` no checkout.
+
+### O consumidor Doctrine tem dois bancos, e os dois entram no fluxo
+
+É a diferença que separa esse stack dos outros três. As migrações do consumidor
+Doctrine moram em **dois diretórios, um por conexão**, declarados em
+`Migrations/migrations.php`:
+
+| Banco | Escopo | Onde as migrações moram |
+|---|---|---|
+| MySQL | financeiro do SaaS | `Migrations/mysql/Version*.php` |
+| PostgreSQL | o resto do sistema | `Migrations/pgsql/Version*.php` |
+
+Um alerta que cobrisse só o PostgreSQL deixaria a base do financeiro sem
+proteção, e — pior — sem nada falhando: um banco fora do glob é indistinguível de
+um PR sem migração. Por isso o `*` do glob é o diretório do banco, e por isso
+`tests/test_corpus.py` afirma a contagem de arquivos **por diretório** em vez de
+deduzi-la do total.
+
+O parser não recebe dica de dialeto, e não é omissão. O caminho diz qual banco é,
+então a dica estaria disponível — mas `detect/sql.py` já reconhece os dois
+vocabulários ao mesmo tempo, porque a diferença entre eles é vocabulário e não
+gramática: `MODIFY col ... NOT NULL` só existe no MySQL, `ALTER COLUMN col SET
+NOT NULL` só existe no PostgreSQL, e as duas formas já têm linha própria na
+tabela de regras, com a mesma severidade e a mesma frase. Não existe statement
+cuja severidade mude conforme o dialeto, logo não existe teste que distinga o
+parâmetro presente do parâmetro ausente. Qual banco foi mexido continua visível
+onde sempre esteve: no caminho do arquivo, que a mensagem do Slack imprime ao
+lado de cada finding.
+
+O único lugar onde o dialeto realmente muda o significado de um caractere é a
+aspa dupla, e a resposta lá é assumir a leitura perigosa: `"..."` delimita
+identificador no PostgreSQL, mas no MySQL — sem `ANSI_QUOTES`, que é o default —
+delimita **string**. `detect/sql.py` não sabe qual é, então o corte que elide
+valores antes de ecoar um statement vale para as três aspas.
+
+O parser lê o corpo de `up()` e ignora `down()`, como o do TypeORM, e extrai o
+primeiro argumento de cada `$this->addSql()`. Das quatro sintaxes de string do
+PHP, duas são literais e são lidas — `'...'` e o nowdoc `<<<'SQL'` —; as duas que
+interpolam, `"..."` e o heredoc `<<<SQL`, saem `unknown`, porque o SQL que roda
+pode não ser o que está escrito. O segundo argumento de `addSql()`, o array de
+parâmetros do statement, **nunca é lido**: ele carrega valor, não schema.
 
 ## Contrato de Entrada/Saída da Action
 
@@ -295,6 +356,7 @@ encaminhado ao parser do seu stack por `detect/__init__.py`:
 |---|---|---|
 | SQL | `.sql` | — |
 | TypeORM | `.ts` | o arquivo traz `implements MigrationInterface` |
+| Doctrine | `.php` | o arquivo estende `AbstractMigration` **em posição de código** |
 | Django | `.py` | o módulo declara uma classe `Migration` |
 | Alembic | `.py` | o módulo declara uma função `upgrade` |
 
@@ -304,7 +366,22 @@ diretório (`script_location`, `MIGRATION_MODULES`); `**/migrations/*.ts` é do
 TypeORM tanto quanto de qualquer outro migrador de TypeScript. O marcador de
 cada stack é o contrato de runtime do framework — o Django carrega
 `module.Migration`, o Alembic chama `module.upgrade()`, o TypeORM exige
-`implements MigrationInterface`.
+`implements MigrationInterface`, o Doctrine só executa subclasse de
+`AbstractMigration`.
+
+**"Em posição de código" é a parte que importa no marcador do Doctrine.** O
+consumidor tem um gerador de migrações — `Migrations/Migrator/Command/MakeCommand.php`
+— que monta o arquivo novo a partir de um template, e o template mora num heredoc
+interpolado: o gerador contém, escritos por extenso, `AbstractMigration`,
+`extends AbstractMigration` e a assinatura de `public function up()`. Um marcador
+por substring leria o gerador como migração, o parser abriria o `up()` vazio do
+template e o dispatch publicaria um `unknown` em todo PR que mexesse no gerador.
+
+O marcador é `doctrine.declares_migration`, que roda sobre o texto **já apagado
+pelo scanner do parser**: dentro do heredoc não há código, então o marcador vê
+exatamente o que o parser vê. É a mesma propriedade que `declares_migration_class`
+dá ao Django e `declares_upgrade` ao Alembic — marcador e portão de confiança
+olhando o mesmo arquivo com os mesmos olhos.
 
 `.sql` é a única linha sem marcador, e por um motivo: `sql.py` classifica todo
 statement e devolve `unknown` para o verbo que não reconhece, então um `.sql` de
@@ -318,11 +395,13 @@ responde silêncio quando não sabe decidir. Saem como `unknown`:
 - arquivo `.py` que não é Python válido;
 - arquivo que casa os marcadores de Django e de Alembic ao mesmo tempo;
 - arquivo que declara operações num framework que este pacote não conhece —
-  yoyo, South, peewee, Knex, Prisma. Ele casou `migration_paths`, então alguém o
-  considera migração;
+  yoyo, South, peewee, Knex, Prisma, Phinx. Ele casou `migration_paths`, então
+  alguém o considera migração;
 - arquivo cujo parser foi escolhido e voltou vazio embora o arquivo declare
   operações. É o caso do South, que traz `class Migration` — casando o marcador
-  do Django — mas guarda as operações em `def forwards`.
+  do Django — mas guarda as operações em `def forwards`; e o da migração do
+  Doctrine escrita com o schema builder (`$schema->createTable(...)`) em vez de
+  `$this->addSql()`, que o parser não lê.
 
 O que separa "não é uma migração" de "é uma migração que eu não sei ler" é
 declarar operações, e em todo dialeto uma operação é uma **chamada**. Um
@@ -331,7 +410,8 @@ TypeScript não tem chamada nenhuma e sai com zero findings, sem alarme.
 
 No caso do Django, `detect/history.py` reconstrói o estado do app anterior à
 migração a partir do diretório `migrations/` em disco, o que exige
-`fetch-depth: 0` no checkout (os três workflows já fazem). É ele que permite
+`fetch-depth: 0` no checkout (os workflows dos consumidores já fazem). É ele que
+permite
 dizer se um `AlterField` encurtou a coluna, tornou o campo `NOT NULL` ou só
 mexeu num `help_text`: sem esse estado, `AlterField` sai `unknown`.
 
@@ -350,7 +430,7 @@ Filtro aplicado (gerado dinamicamente a partir dos globs configurados):
 
 ```bash
 git diff --name-only "$BASE_SHA" "$HEAD_SHA" \
-  | grep -E "(\.sql$|.*/migrations/.*\.py$|.*/alembic/versions/.*\.py$|.*[Aa]uto[Mm]igrate\.ts$)" \
+  | grep -E "(\.sql$|.*/migrations/.*\.py$|.*/alembic/versions/.*\.py$|.*[Aa]uto[Mm]igrate\.ts$|.*Migrations/[^/]*/Version20[^/]*\.php$)" \
   | grep -Eiv "dump" || true
 ```
 
@@ -397,9 +477,9 @@ arquivo que some da saída é indistinguível de um arquivo sem mudança de banc
 
 `confidence` é `0.0` quando `highest_severity` é `unknown` e `1.0` em qualquer
 outro caso — não há gradação num classificador determinístico. A contagem de
-itens não é comparável entre stacks: o parser do TypeORM devolve um item por
-statement, enquanto os de Django e Alembic colapsam um `RunSQL`/`op.execute` de
-vários statements num item só.
+itens não é comparável entre stacks: os parsers do TypeORM e do Doctrine devolvem
+um item por statement, enquanto os de Django e Alembic colapsam um
+`RunSQL`/`op.execute` de vários statements num item só.
 
 ## Formato de mensagem no Slack (obrigatório)
 
@@ -440,6 +520,7 @@ Na ordem de gravidade:
 
 - Nunca imprimir `slack_webhook_url` em logs.
 - **Nenhum dado da migração sai da action.** Migração de dados carrega linha de paciente; nem o texto do Slack nem o `analysis_json` podem citar conteúdo de arquivo. Razão e operação vêm prontas dos parsers, que cortam valores antes de citar um statement, e há teste de invariante cruzando um corpus adversarial contra todos os parsers e contra o que sai da action.
+- O corte que elide valores vale para as **três** aspas, e não só para a simples. `"..."` delimita identificador no PostgreSQL mas string no MySQL, e o classificador atende os dois dialetos sem saber qual é: `INSERT INTO subjects (name) VALUES ("Maria Silva")` publicava o nome inteiro. Metade do corpus do consumidor Doctrine é migração de dados, nas duas bases.
 - Logar decisões de classificação com justificativa.
 - Registrar payload final enviado ao Slack sem segredos.
 
@@ -450,9 +531,12 @@ que toca `migration-detector/`, com piso de 90% de cobertura por linha sobre
 `detect/`.
 
 O portão de regressão de determinismo vive em `tests/test_corpus.py` e roda
-sobre `tests/fixtures/corpus/`, que tem quatro stacks (`django/`, `alembic/`,
-`typeorm/`, `sql/`) mais `dispatch/`, os arquivos que exercitam as razões que o
-próprio dispatch produz. Cada arquivo tem uma entrada em `manifest.json` com a
+sobre `tests/fixtures/corpus/`, que tem cinco stacks (`django/`, `alembic/`,
+`typeorm/`, `doctrine/`, `sql/`) mais `dispatch/`, os arquivos que exercitam as
+razões que o próprio dispatch produz. As fixtures do Doctrine ficam em
+`doctrine/Migrations/mysql/` e `doctrine/Migrations/pgsql/`, espelhando os dois
+diretórios de banco do consumidor — é o que permite rodar a conversão glob→regex
+do step `Collect` sobre o caminho delas e provar que as duas bases entram. Cada arquivo tem uma entrada em `manifest.json` com a
 severidade, a operação e a **frase renderizada** de cada finding; o teste
 compara a lista inteira, em ordem.
 
@@ -480,8 +564,8 @@ dois deles do portão de determinismo —, com cara de regressão do classificad
 
 ### Por que o corpus é escrito e não copiado
 
-`iclinic/automations` é um repositório **público**. Vendorizar as 638 migrações
-dos três repositórios consumidores publicaria o schema de produção dos três
+`iclinic/automations` é um repositório **público**. Vendorizar as 656 migrações
+dos quatro repositórios consumidores publicaria o schema de produção dos quatro
 serviços, além dos nomes de parceiros comerciais e da lista de fornecedores que
 algumas migrações de dados carregam.
 
@@ -489,18 +573,55 @@ Então cada fixture é escrita, e existe por um motivo declarado: uma linha de u
 tabela de regras, um caso de resíduo, um dos arquivos citados na ADR. **Ao
 adicionar uma fixture, escreva-a — não copie de um repositório consumidor.**
 `tests/test_pii.py` tem a invariante que arrebenta se alguém copiar: nenhuma
-razão do corpus pode citar número longo ou aspa.
+razão do corpus pode citar número longo ou aspa, e
+`TestNoProductionNameSurvivesInWhatGoesPublic` compara o vocabulário de posição
+de schema dos clones com o de tudo que vai ser publicado — sem lista de termos
+escrita à mão, que é o que deixou passar três levas de limpeza.
+
+### O que o corpus real de cada stack não exercita
+
+O corpus de um consumidor cobre o que ele já fez, não o que ele pode fazer, e é
+por isso que a fixture escrita não é redundante com ele. Dois achados concretos:
+
+- no Alembic, os `DROP TABLE` e `DROP COLUMN` viviam só em `downgrade()`, que o
+  parser ignora por especificação — as regras mais destrutivas nunca eram
+  alcançadas por dado real (QQ-2161);
+- no Doctrine, o mesmo: 18 arquivos e nenhum `DROP TABLE` ou `DROP COLUMN` em
+  `up()`. Sem as fixturas de `doctrine/`, um `DROP TABLE` classificado como
+  `safe` passaria a suíte inteira, nos dois dialetos.
+
+**Ao adicionar um stack, escreva a fixture da destruição mesmo que o consumidor
+não tenha nenhuma.**
 
 Os identificadores das fixtures também são sintéticos — app, modelo, tabela,
 coluna e nome de arquivo. Nenhum nome de app, de tabela ou de coluna de produção
-aparece no corpus, e nenhum dos três consumidores é citado pelo nome do seu
+aparece no corpus, e nenhum dos consumidores é citado pelo nome do seu
 repositório. **Fixture nova segue a mesma regra.** O mapa que amarra cada
 fixture da ADR ao arquivo real que ela reproduz mora em
 `tests/fixtures/.identifier-map.json`, fora do repositório e no `.gitignore`.
 
-A medição real dos três consumidores continua registrada em `REAL_CORPUS` e
+A medição real dos consumidores continua registrada em `REAL_CORPUS` e
 reconferida por `TestTheRealCorpus`, que pula sozinho quando os clones — ou o
 mapa — não estão ao lado, que é sempre o caso no CI, como o aceite exige.
+
+A do Doctrine tem duas colunas que as outras não têm, e as duas por causa do que
+o cartão da SHS-606 protege: a contagem de arquivos **por diretório de banco**, e
+a separação entre "arquivo com `unknown`" e "DDL sem classificação". Dos 18
+arquivos do consumidor, 10 voltam com pelo menos um `unknown` — a taxa por
+arquivo mais baixa das quatro stacks — e **todos os 13 `unknown` são verbos de
+DML**: `INSERT`, `UPDATE` e `DELETE`, que estão fora da tabela de statements de
+`detect/sql.py` nas quatro stacks, do mesmo jeito que estão para um `RunSQL` do
+Django ou um `op.execute()` do Alembic. Nenhum statement de DDL dos 18 arquivos
+deixou de ser decidido, e `test_every_doctrine_unknown_is_a_data_verb_and_no_ddl_escaped`
+afirma isso por igualdade de conjunto: um `DROP COLUMN` que passasse a sair
+`unknown` acrescentaria `DROP COLUMN` ao conjunto e derrubaria o teste.
+
+A taxa baixa é, então, propriedade do corpus e não do parser — metade das
+migrações desse consumidor é migração de dados escrita em SQL cru, enquanto as do
+Django passam por `RunPython`, que tem linha própria na tabela. Trocar isso
+exigiria dar linha de severidade a `INSERT`, `UPDATE` e `DELETE` em
+`detect/sql.py`, o que mudaria a classificação das quatro stacks de uma vez; é
+decisão de tabela de severidade, não deste parser, e a QQ-2162 é onde ela cabe.
 
 ## Resultado esperado para o time de dados
 
