@@ -18,9 +18,25 @@ Com isso, o time de dados consegue priorizar review, avaliar impacto em pipeline
 
 ## ⚠️ Release publicada = deploy imediato
 
-`.github/workflows/update-semver-tags-on-release.yml` roda `git tag -f` em `v3`
-e `v3.N` a cada release publicada, e os três repositórios consumidores fixam
-`@v3`. Ou seja: **release publicada = deploy imediato para os três.**
+`.github/workflows/update-semver-tags-on-release.yml` roda `git tag -f` nas tags
+de major e minor a cada release publicada, e os repositórios consumidores fixam
+a major. Ou seja: **release publicada = deploy imediato para quem pina aquela
+major.**
+
+A subida desta entrega é a **`v5.0.0`**, decidida na
+[ADR 0001](../docs/adr/0001-provedor-de-ia-do-migration-detector.md). Não é a
+linha `v3.x`: a tag é do repositório inteiro e o repo é público, então uma
+`v3.5.0` cortada da main faria a tag `v3` saltar por cima da `v3.4` e da
+`v4.0.0` e trocaria o código embaixo de qualquer consumidor que tenha pinado
+qualquer uma das outras oito automações naquela major. É major e não minor
+porque `highest_severity` ganhou o valor `unknown`, que é valor novo num output
+em que consumidor pode ramificar, e `minimum_confidence` ficou inerte.
+
+O custo é um PR de uma linha em cada consumidor, trocando a major fixada por
+`@v5`.
+
+> A tag `@v5` só existe depois da Release. Até lá, quem quiser exercitar esta
+> versão aponta para a branch.
 
 A janela aberta entre QQ-2159 e QQ-2160 está fechada: o classificador
 determinístico de `detect/` está ligado no lugar da chamada de IA, que falhava
@@ -39,9 +55,9 @@ em toda migração desde que a GitHub Models API foi desligada em 2026-07-30.
 
 ### 1. No repositório `iclinic/automations`
 
-A action já está disponível em `iclinic/automations/migration-detector@v3` e não requer alteração de código para uso. É necessário apenas garantir que as **variables** abaixo existam no nível da organização, acessíveis aos repositórios que usarão a action.
+A action é consumida como `iclinic/automations/migration-detector@v5` e não requer alteração de código para uso. É necessário apenas garantir que as **variables** abaixo existam no nível da organização, acessíveis aos repositórios que usarão a action.
 
-> `slack_webhook_url` vazia **falha o job**: sem canal a action não tem como avisar ninguém, e antes ela saía verde em silêncio. Configure antes de adicionar o workflow ao repositório.
+> `slack_webhook_url` vazia **falha o job em PR que toca migração**: sem canal a action não tem como avisar ninguém, e antes ela saía verde em silêncio. PR que não toca migração passa, com `::warning::` nos checks. Configure antes de adicionar o workflow ao repositório.
 
 Verifique (ou crie) cada variable em `https://github.com/organizations/iclinic/settings/variables/actions` e confira se o repositório consumidor está listado em **Repository access**:
 
@@ -82,7 +98,7 @@ jobs:
 
       - name: Detect DB migration impact
         id: migration_detector
-        uses: iclinic/automations/migration-detector@v3
+        uses: iclinic/automations/migration-detector@v5
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           slack_webhook_url: ${{ vars.SLACK_WEBHOOK_URL }}
@@ -168,8 +184,8 @@ nova que aceita `NULL` ou traz `DEFAULT` (`AddField`, `op.add_column`,
 `controlled` — coluna nova `NOT NULL` sem `DEFAULT`, que barra a migração numa
 tabela que já tem linha; coluna que passou a aceitar `NULL`; coluna que ficou
 mais larga; mudança de `DEFAULT`; remoção de índice ou de constraint;
-`unique_together` esvaziado; e `RunPython`, que é migração de dados cujo corpo o
-classificador não lê.
+`unique_together` esvaziado; e `RunPython` de dados, cujo corpo o classificador
+varre por DDL e não encontra nenhum — quando encontra, quem decide é o DDL.
 
 `unknown` — a seção abaixo.
 
@@ -207,7 +223,11 @@ Sai `unknown`:
 - verbo ou ação de SQL que o parser não reconhece, incluindo
   `ALTER TYPE ... RENAME`;
 - os quatro casos em que o dispatch não sabe a quem entregar o arquivo, na
-  seção [Classificador determinístico](#classificador-determinístico).
+  seção [Classificador determinístico](#classificador-determinístico);
+- arquivo do diff com cara de migração — sob `migrations/` ou
+  `alembic/versions/`, ou com nome prefixado por timestamp — que nenhum padrão
+  de `migration_paths` casou. O classificador não chegou a lê-lo, e é isso que
+  a linha do Slack diz. O conserto é ajustar `migration_paths` no workflow.
 
 Como `unknown` é mais grave que `controlled`, ele governa a severidade do PR
 sempre que nada pior aparece. A recomendação de governança é a mesma que a de
