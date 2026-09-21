@@ -11,7 +11,7 @@ from build_slack_payload import (
     build_payload,
     main,
 )
-from detect.severity import SEVERITY_META, Severity
+from detect.severity import SEVERITY_META, Severity, UnknownSeverity
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -165,10 +165,10 @@ class TestMain:
         assert ATTACHMENT(payload)["text"] == "migration detected"
         assert ATTACHMENT(payload)["color"] == COLOR_MAP["breaking"]
 
-    def test_main_defaults_when_env_absent(self, monkeypatch, capsys):
+    def test_main_defaults_text_and_channel_when_absent(self, monkeypatch, capsys):
         monkeypatch.delenv("SLACK_TEXT", raising=False)
         monkeypatch.delenv("SLACK_CHANNEL", raising=False)
-        monkeypatch.delenv("HIGHEST_SEVERITY", raising=False)
+        monkeypatch.setenv("HIGHEST_SEVERITY", "safe")
 
         main()
 
@@ -177,9 +177,31 @@ class TestMain:
 
         assert ATTACHMENT(payload)["text"] == ""
         assert "channel" not in payload
-        # Sem HIGHEST_SEVERITY, `main()` lê "none" — que agora tem linha própria.
-        assert ATTACHMENT(payload)["color"] == COLOR_MAP["none"]
-        assert ATTACHMENT(payload)["color"] != DEFAULT_COLOR
+
+    # `HIGHEST_SEVERITY` ausente virava `"none"`, que tem linha na tabela e é a
+    # cor de "sem alteração de banco". O texto da mensagem podia dizer
+    # `breaking` com a faixa cinza do lado. É o mesmo default silencioso que
+    # `classify.py` trocou por validação, e ele fica alcançável no instante em
+    # que o step do Slack passa a rodar com `has_files=false`.
+    @pytest.mark.parametrize("value", [None, "", "   "])
+    def test_main_refuses_to_paint_without_a_severity(self, monkeypatch, value):
+        monkeypatch.setenv("SLACK_TEXT", "🔴 *Breaking Change* detectada")
+        monkeypatch.setenv("SLACK_CHANNEL", "")
+        if value is None:
+            monkeypatch.delenv("HIGHEST_SEVERITY", raising=False)
+        else:
+            monkeypatch.setenv("HIGHEST_SEVERITY", value)
+
+        with pytest.raises(UnknownSeverity):
+            main()
+
+    def test_main_refuses_a_severity_outside_the_vocabulary(self, monkeypatch):
+        monkeypatch.setenv("SLACK_TEXT", "qualquer")
+        monkeypatch.setenv("SLACK_CHANNEL", "")
+        monkeypatch.setenv("HIGHEST_SEVERITY", "critical")
+
+        with pytest.raises(UnknownSeverity):
+            main()
 
     def test_main_strips_channel_whitespace(self, monkeypatch, capsys):
         monkeypatch.setenv("SLACK_TEXT", "")

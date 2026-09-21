@@ -1,7 +1,7 @@
 import json
 import os
 
-from detect.severity import SEVERITY_META
+from detect.severity import SEVERITY_META, to_severity
 
 # A cor do anexo vem da mesma tabela que o emoji e o rótulo da mensagem. Antes
 # eram duas tabelas: esta não tinha `none` nem `unknown`, e as duas caíam no
@@ -35,7 +35,14 @@ def build_payload(text: str, channel: str, severity: str) -> dict:
 def main() -> None:
     text = os.environ.get("SLACK_TEXT", "")
     channel = os.environ.get("SLACK_CHANNEL", "").strip()
-    severity = os.environ.get("HIGHEST_SEVERITY", "none")
+
+    # `os.environ.get("HIGHEST_SEVERITY", "none")` era o último default
+    # silencioso do caminho do Slack: variável ausente virava `none`, que tem
+    # linha na tabela e é a cor de "sem alteração de banco". Uma mensagem
+    # dizendo `breaking` saía com a faixa cinza do lado. `to_severity` levanta
+    # `UnknownSeverity` para ausente, vazia e valor fora do vocabulário — a
+    # mesma validação que `classify.py` já faz do outro lado do output.
+    severity = to_severity((os.environ.get("HIGHEST_SEVERITY") or "").strip() or None)
 
     print(json.dumps(build_payload(text, channel, severity)))
 
