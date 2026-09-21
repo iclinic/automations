@@ -42,8 +42,16 @@ from ._reading import (
     operations_of,
     text,
 )
-from .severity import DUPLICATE, MANUAL, Finding, Severity, ref, worst
-from .sql import classify_sql
+from .severity import (
+    DUPLICATE,
+    MANUAL,
+    Finding,
+    Severity,
+    ref,
+    severity_rank,
+    worst,
+)
+from .sql import classify_sql, looks_like_ddl
 
 __all__ = ["classify_migration"]
 
@@ -233,9 +241,14 @@ _OPERATIONS: dict[str, _Operation] = {
     ),
     # --- código arbitrário ---
     "RunPython": _Operation(
+        # Expandido por `_expand_run_python`, que varre o corpo da função por
+        # DDL. A regra desta linha é o piso: o que sobra quando o corpo é
+        # mesmo só dados, ou quando o DDL que saiu de lá não passa de
+        # `controlled`.
         Severity.CONTROLLED,
-        "Migração de dados em Python — o classificador não lê o que a função faz. "
+        "Migração de dados em Python — nenhum DDL no corpo da função. "
         "Confirmar o volume e o impacto com o time de dados.",
+        signature=("code", "reverse_code", "atomic", "hints", "elidable"),
     ),
     "RunSQL": _Operation(
         # Expandido por `_expand_run_sql`, que delega para `detect/sql.py`. A
@@ -415,6 +428,141 @@ def _expand_run_sql(
     ]
 
 
+# Marca o buraco de uma f-string no lugar do valor interpolado. Precisa
+# atravessar o `sql.py` sem virar identificador: `ALTER TABLE ? MODIFY col
+# BIGINT NOT NULL` classifica pelo verbo e pela ação, e a tabela sai como
+# "(nome não identificado)" — que é a verdade, porque o nome está numa
+# variável que só existe em tempo de execução.
+_INTERPOLATION = "?"
+
+# `code` não é um nome deste arquivo nem um lambda: função importada, método,
+# `functools.partial`, item de dicionário. O corpo existe, só não aqui.
+_BODY_NOT_READ = (
+    "Migração de dados em Python — o corpo da função não está neste arquivo e o "
+    "classificador não o leu. Confirmar o volume e o impacto com o time de dados."
+)
+
+
+def _rendered(node: ast.JoinedStr) -> str:
+    """O texto de uma f-string, com `?` no lugar de cada valor interpolado."""
+    return "".join(
+        value.value
+        if isinstance(value, ast.Constant) and isinstance(value.value, str)
+        else _INTERPOLATION
+        for value in node.values
+    )
+
+
+def _strings_in(node: ast.AST) -> Iterable[str]:
+    """Cada string do corpo, com a f-string contada como uma só.
+
+    `ast.walk` não serve: os pedaços literais de uma f-string são `Constant`
+    filhos do `JoinedStr`, e `f"ALTER TABLE {t} MODIFY c BIGINT NOT NULL"`
+    entregaria `"ALTER TABLE "` sozinho. Esse pedaço tem cara de DDL, não tem
+    ação nenhuma, e viraria um `unknown` que o arquivo não pediu.
+    """
+    if isinstance(node, ast.JoinedStr):
+        yield _rendered(node)
+        return
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, str):
+            yield node.value
+        return
+    for child in ast.iter_child_nodes(node):
+        yield from _strings_in(child)
+
+
+def _functions_of(module: ast.Module | None) -> dict[str, ast.AST]:
+    """As funções definidas no arquivo, por nome."""
+    if module is None:
+        return {}
+    return {
+        node.name: node
+        for node in ast.walk(module)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+
+
+def _body_of(module: ast.Module | None, node: ast.expr | None) -> list[ast.AST] | None:
+    """O corpo que o `RunPython` vai executar, com os helpers do arquivo junto.
+
+    Resolve um `ast.Name` contra as funções deste módulo e aceita o lambda
+    inline. Qualquer outra coisa devolve `None`: o classificador não segue
+    import, não resolve atributo e não executa nada.
+
+    Seguir as chamadas não é sofisticação: é a forma do arquivo real da
+    Evidência 1 da ADR. A função que o `RunPython` referencia só faz a guarda
+    de vendor e delega o `cursor.execute` a um `_modify_column` do mesmo
+    arquivo, e é lá que mora o `ALTER TABLE ... MODIFY ...`. Varrer um nível só
+    acharia a guarda e chamaria o arquivo de migração de dados.
+
+    `seen` fecha o ciclo de uma função que chama a si mesma ou a um par
+    mutuamente recursivo. Só nomes deste módulo entram — `cursor.execute` e
+    `apps.get_model` não são função daqui e não resolvem para nada.
+    """
+    if isinstance(node, ast.Lambda):
+        roots: list[ast.AST] = [node.body]
+    elif module is not None and isinstance(node, ast.Name):
+        function = _functions_of(module).get(node.id)
+        if function is None:
+            return None
+        roots = [function]
+    else:
+        return None
+
+    functions = _functions_of(module)
+    body: list[ast.AST] = []
+    seen: set[str] = {node.id} if isinstance(node, ast.Name) else set()
+    queue = list(roots)
+    while queue:
+        root = queue.pop(0)
+        body.append(root)
+        for inner in ast.walk(root):
+            if not isinstance(inner, ast.Call):
+                continue
+            name = call_name(inner)
+            if name is None or name in seen or name not in functions:
+                continue
+            seen.add(name)
+            queue.append(functions[name])
+    return body
+
+
+def _expand_run_python(
+    walker: "_Walker", operation: _Operation, call: ast.Call
+) -> list[Finding]:
+    """Varre o corpo da função por DDL, com `controlled` de piso.
+
+    `RunPython` era severidade fixa, e a ADR 0001 mostra o tamanho do que isso
+    decidia por constante: a operação aparece em 65 dos 591 arquivos do
+    consumidor Django, e em 44 deles é a única. A premissa "mudança de dados,
+    sem DDL" é falsa em pelo menos dois arquivos do próprio corpus, que montam
+    `ALTER TABLE ... MODIFY ... NOT NULL` com f-string dentro do corpo — e sem
+    esta varredura eles só acertam pela reconstrução de estado do `AlterField`,
+    que é via única e falha nos 2% de campos sem estado anterior.
+
+    O piso não é arredondamento: uma migração de dados de verdade continua
+    valendo `controlled` mesmo que crie um índice no meio do caminho, porque o
+    que pesa nela é o volume. O que passa do piso passa com a razão que veio do
+    `sql.py`, inclusive o `unknown` de um DDL que ele não reconhece.
+    """
+    body = _body_of(walker.module, _argument(operation, call, "code"))
+    if body is None:
+        return [Finding(Severity.CONTROLLED, "RunPython", _BODY_NOT_READ)]
+
+    findings = [
+        finding
+        for root in body
+        for statement in _strings_in(root)
+        if looks_like_ddl(statement)
+        for finding in classify_sql(statement)
+    ]
+    hardest = worst(findings)
+    if hardest is None or severity_rank(hardest.severity) <= severity_rank(Severity.CONTROLLED):
+        return [_finding("RunPython", operation, call)]
+    return [hardest]
+
+
 def _expand_separate_database_and_state(
     walker: "_Walker", operation: _Operation, call: ast.Call
 ) -> list[Finding]:
@@ -484,6 +632,7 @@ def _expand_separate_database_and_state(
 
 
 _EXPANDERS: dict[str, Callable[["_Walker", _Operation, ast.Call], list[Finding]]] = {
+    "RunPython": _expand_run_python,
     "RunSQL": _expand_run_sql,
     "SeparateDatabaseAndState": _expand_separate_database_and_state,
 }
@@ -539,8 +688,14 @@ class _Walker:
     respondia antes de existir `detect/history.py`.
     """
 
-    def __init__(self, prior: _PriorState | None = None) -> None:
+    def __init__(
+        self, prior: _PriorState | None = None, module: ast.Module | None = None
+    ) -> None:
         self.prior = prior
+        # A árvore do arquivo inteiro, não só a lista `operations`:
+        # `_expand_run_python` precisa achar a função que o `RunPython`
+        # referencia, e ela mora fora da classe `Migration`.
+        self.module = module
         if prior is not None:
             # O estado é de um arquivo só. Reusar o mesmo objeto em dois
             # `classify_migration` faria as operações do primeiro entrarem no
@@ -667,4 +822,4 @@ def classify_migration(source: str, prior: _PriorState | None = None) -> list[Fi
     items, reason = operations_of(tree)
     if items is None:
         return _unreadable(reason or "")
-    return _Walker(prior).classify_all(items)
+    return _Walker(prior, tree).classify_all(items)

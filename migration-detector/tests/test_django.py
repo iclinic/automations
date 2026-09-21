@@ -877,6 +877,141 @@ class TestRunPython:
         assert "Python" in finding.reason
 
 
+class TestRunPythonBodyIsScannedForDDL:
+    """`RunPython` não é severidade fixa (ADR 0001).
+
+    `controlled` é o piso das migrações que são de dados de verdade, não a
+    resposta para todas: o corpo é varrido por strings com cara de DDL —
+    literais e f-strings — e o que sair vai para o `detect/sql.py`. Os dois
+    arquivos da Evidência 1 da ADR montam `ALTER TABLE ... MODIFY ... NOT NULL`
+    com f-string dentro do corpo, e sem esta varredura eles dependem de via
+    única: a reconstrução de estado do `AlterField`.
+    """
+
+    def test_ddl_literal_in_the_body_decides_the_severity(self):
+        source = migration(
+            "migrations.RunPython(drop_it, migrations.RunPython.noop),",
+            preamble=(
+                "def drop_it(apps, schema_editor):\n"
+                "    with schema_editor.connection.cursor() as cursor:\n"
+                "        cursor.execute('ALTER TABLE app_thing DROP COLUMN legacy_code')\n"
+            ),
+        )
+        assert only(source).severity is Severity.BREAKING
+
+    def test_ddl_built_with_an_f_string_decides_the_severity(self):
+        source = migration(
+            "migrations.RunPython(tighten, migrations.RunPython.noop),",
+            preamble=(
+                "TABLE = 'app_thing'\n"
+                "def tighten(apps, schema_editor):\n"
+                "    schema_editor.execute(\n"
+                "        f'ALTER TABLE {TABLE} MODIFY external_id BIGINT NOT NULL'\n"
+                "    )\n"
+            ),
+        )
+        assert only(source).severity is Severity.BREAKING
+
+    def test_a_data_migration_without_ddl_stays_on_the_floor(self):
+        source = migration(
+            "migrations.RunPython(backfill, migrations.RunPython.noop),",
+            preamble=(
+                "def backfill(apps, schema_editor):\n"
+                "    Thing = apps.get_model('app', 'Thing')\n"
+                "    Thing.objects.filter(title='').update(title='sem titulo')\n"
+            ),
+        )
+        assert only(source).severity is Severity.CONTROLLED
+
+    def test_a_prose_string_in_the_body_is_not_read_as_sql(self):
+        source = migration(
+            "migrations.RunPython(backfill, migrations.RunPython.noop),",
+            preamble=(
+                "def backfill(apps, schema_editor):\n"
+                "    raise RuntimeError('DROP everything is not what this does')\n"
+            ),
+        )
+        assert only(source).severity is Severity.CONTROLLED
+
+    def test_ddl_the_sql_classifier_does_not_recognise_is_unknown(self):
+        source = migration(
+            "migrations.RunPython(reorganise, migrations.RunPython.noop),",
+            preamble=(
+                "def reorganise(apps, schema_editor):\n"
+                "    schema_editor.execute('ALTER TABLE app_thing CLUSTER ON idx_thing')\n"
+            ),
+        )
+        assert only(source).severity is Severity.UNKNOWN
+
+    def test_safe_ddl_in_the_body_does_not_drop_below_the_floor(self):
+        source = migration(
+            "migrations.RunPython(add_index, migrations.RunPython.noop),",
+            preamble=(
+                "def add_index(apps, schema_editor):\n"
+                "    schema_editor.execute('CREATE INDEX idx_thing ON app_thing (title)')\n"
+            ),
+        )
+        assert only(source).severity is Severity.CONTROLLED
+
+    def test_the_reason_of_a_ddl_body_comes_from_the_sql_classifier(self):
+        source = migration(
+            "migrations.RunPython(drop_it, migrations.RunPython.noop),",
+            preamble=(
+                "def drop_it(apps, schema_editor):\n"
+                "    schema_editor.execute('ALTER TABLE app_thing DROP COLUMN legacy_code')\n"
+            ),
+        )
+        finding = only(source)
+        assert finding.operation == "DROP COLUMN"
+        assert "legacy_code" in finding.reason
+
+    def test_a_lambda_body_is_scanned_too(self):
+        source = migration(
+            "migrations.RunPython("
+            "lambda apps, se: se.execute('DROP TABLE app_thing'), "
+            "migrations.RunPython.noop),"
+        )
+        assert only(source).severity is Severity.BREAKING
+
+    def test_ddl_in_a_helper_the_function_calls_is_found(self):
+        """A forma da Evidência 1 da ADR: o `RunPython` aponta para uma função
+        que delega o `cursor.execute` a um helper do mesmo arquivo. Varrer só o
+        corpo de primeiro nível não acha o `ALTER TABLE`."""
+        source = migration(
+            "migrations.RunPython(set_not_null, migrations.RunPython.noop),",
+            preamble=(
+                "def _modify_column(cursor, null_clause):\n"
+                "    cursor.execute(\n"
+                "        f'ALTER TABLE app_thing MODIFY external_id BIGINT {null_clause}'\n"
+                "    )\n"
+                "def set_not_null(apps, schema_editor):\n"
+                "    with schema_editor.connection.cursor() as cursor:\n"
+                "        _modify_column(cursor, 'NOT NULL')\n"
+            ),
+        )
+        assert only(source).severity is Severity.BREAKING
+
+    def test_a_helper_that_calls_itself_does_not_hang_the_scan(self):
+        source = migration(
+            "migrations.RunPython(walk, migrations.RunPython.noop),",
+            preamble=(
+                "def walk(apps, schema_editor):\n"
+                "    walk(apps, schema_editor)\n"
+                "    schema_editor.execute('DROP TABLE app_thing')\n"
+            ),
+        )
+        assert only(source).severity is Severity.BREAKING
+
+    def test_a_function_the_module_does_not_define_stays_on_the_floor(self):
+        source = migration(
+            "migrations.RunPython(imported_helper, migrations.RunPython.noop),",
+            preamble="from app.helpers import imported_helper\n",
+        )
+        finding = only(source)
+        assert finding.severity is Severity.CONTROLLED
+        assert "corpo" in finding.reason
+
+
 # ---------------------------------------------------------------------------
 # As demais operações do corpus
 # ---------------------------------------------------------------------------

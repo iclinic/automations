@@ -20,6 +20,7 @@ from detect.sql import (
     _classify_alter_table_clause,
     classify_sql,
     classify_statement,
+    looks_like_ddl,
     split_statements,
 )
 
@@ -1077,3 +1078,53 @@ class TestFindingShape:
             severity_of('alter table "schedule" drop column "status"')
             is Severity.BREAKING
         )
+
+
+# ---------------------------------------------------------------------------
+# looks_like_ddl
+# ---------------------------------------------------------------------------
+
+
+class TestLooksLikeDDL:
+    """O portão que decide se uma string solta vale uma passada pelo `sql.py`.
+
+    Existe para o corpo do `RunPython` do Django, onde qualquer string do
+    arquivo chega junto. Sem ele, uma mensagem de erro viraria `unknown` e todo
+    `RunPython` com texto no corpo pediria revisão manual; com ele frouxo
+    demais, um `ALTER TABLE` real passaria batido.
+    """
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "ALTER TABLE app_thing DROP COLUMN legacy_code",
+            "alter table app_thing drop column legacy_code",
+            "  \n CREATE INDEX idx_thing ON app_thing (title)",
+            "DROP TABLE app_thing",
+            "RENAME TABLE a TO b",
+            "TRUNCATE TABLE app_thing",
+            "COMMENT ON TABLE app_thing IS 'x'",
+        ],
+    )
+    def test_statements_that_change_or_describe_schema(self, sql):
+        assert looks_like_ddl(sql) is True
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "",
+            "   ",
+            "sem titulo",
+            "DROP everything is not what this does",
+            "Erro ao processar o registro",
+            "SELECT id FROM app_thing",
+            "UPDATE app_thing SET title = 'x'",
+            "app_thing",
+            "created_at",
+        ],
+    )
+    def test_text_that_is_not_a_ddl_statement(self, text):
+        assert looks_like_ddl(text) is False
+
+    def test_a_leading_comment_does_not_hide_the_verb(self):
+        assert looks_like_ddl("-- ajusta a tabela\nALTER TABLE app_thing DROP COLUMN c") is True

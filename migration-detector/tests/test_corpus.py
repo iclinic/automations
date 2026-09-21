@@ -350,10 +350,15 @@ ADR_FILES = (
     "django/ledger/migrations/0043_modify_supplierservice_external_id_to_non_null.py",
 )
 
-# Os dois arquivos que só `history.prior_state` alcança: a operação de banco é
-# um `RunPython`, que o classificador não lê, então o NOT NULL está apenas no
-# `AlterField` do bloco de estado. Sem estado anterior os dois saem `unknown`.
-PRIOR_STATE_ONLY = (
+# O outro par da Evidência 1 da ADR: a operação de banco é um `RunPython` que
+# monta o `ALTER TABLE ... MODIFY ... NOT NULL` dentro do corpo, e o NOT NULL
+# também está no `AlterField` do bloco de estado. As duas vias são
+# independentes — o `sql.py` lendo o DDL do corpo e o `history.py` comparando
+# com o estado que os ancestrais reconstroem — e é disso que a ADR fala em
+# "nenhum dos oito depende de via única". Enquanto o `RunPython` foi severidade
+# fixa, estes dois dependiam: `test_without_the_ancestors_...` mostra que sem
+# os ancestrais o `AlterField` sozinho cai em `unknown`.
+RUN_PYTHON_DDL = (
     "django/bookings/migrations/0034_modify_external_id_to_non_null.py",
     "django/subjects/migrations/0027_modify_external_id_to_non_null.py",
 )
@@ -377,16 +382,30 @@ class TestTheAdrCases:
         assert "passou a NOT NULL" in findings[0].reason
         assert "passou a NOT NULL" in findings[1].reason
 
-    @pytest.mark.parametrize("name", PRIOR_STATE_ONLY)
-    def test_the_not_null_is_reachable_only_through_the_prior_state(self, name):
+    @pytest.mark.parametrize("name", RUN_PYTHON_DDL)
+    def test_the_ddl_inside_run_python_is_breaking_on_its_own(self, name):
+        """O DDL do corpo do `RunPython` chega ao mesmo veredito do `AlterField`.
+
+        Com `RunPython` valendo `controlled` fixo, o primeiro finding não
+        dependia do arquivo: o `ALTER TABLE ... MODIFY ... NOT NULL` que está
+        literalmente no corpo da função nunca era lido, e o `breaking` vinha só
+        da reconstrução de estado. A ADR mede que 2% dos `AlterField` do corpus
+        não têm estado anterior no grafo; quando isso coincidir com um
+        `RunPython`, a via única não responde.
+        """
         findings = findings_of(name)
-        assert [f.operation for f in findings] == ["RunPython", "AlterField"]
-        assert findings[0].severity is Severity.CONTROLLED
-        assert findings[1].severity is Severity.BREAKING
+        # `MODIFY` e não `MODIFY ... NOT NULL`: a cláusula de nulidade é o
+        # argumento interpolado da f-string, e o classificador não executa nada
+        # para saber qual das duas chamadas está em jogo. O que sobra na
+        # string é a mudança de tipo, que já é `breaking` — e a razão diz isso,
+        # em vez de afirmar um NOT NULL que ela não leu.
+        assert [f.operation for f in findings] == ["MODIFY", "AlterField"]
+        assert all(f.severity is Severity.BREAKING for f in findings)
+        assert findings[0].reason.startswith("Tipo da coluna `external_id` de ")
         assert findings[1].reason.startswith("Campo `external_id` de ")
         assert "passou a NOT NULL" in findings[1].reason
 
-    @pytest.mark.parametrize("name", PRIOR_STATE_ONLY)
+    @pytest.mark.parametrize("name", RUN_PYTHON_DDL)
     def test_without_the_ancestors_the_same_file_would_be_unknown(self, name, tmp_path):
         """A mesma fonte, sozinha num diretório, perde o `breaking`.
 
@@ -776,7 +795,7 @@ class TestTheRealCorpus:
         pairs = IDENTIFIER_MAP["adr_fixtures"]
         # O mapa não pode cobrir menos que os quatro arquivos que o corpus
         # versionado nomeia — senão ele silencia o teste em vez de habilitá-lo.
-        assert set(pairs) == set(ADR_FILES) | set(PRIOR_STATE_ONLY)
+        assert set(pairs) == set(ADR_FILES) | set(RUN_PYTHON_DDL)
 
         identifiers = IDENTIFIER_MAP["identifiers"]
         for fixture, real in sorted(pairs.items()):

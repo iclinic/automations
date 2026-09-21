@@ -521,6 +521,7 @@ _GENERIC_BY_REVIEW = {
     ),
     "schedule_status_enum_old": "idem, com o sufixo que o TypeORM usa na reescrita de enum",
     "information_schema": "catálogo padrão do PostgreSQL",
+    "yes": "valor que o `IS_NULLABLE` do `information_schema` assume, não um nome",
     "django_add_default_value": "pacote público do PyPI, lido pelo dispatch como operação de terceiro",
     # --- artefato do extrator, não identificador ---------------------------
     "__future__": "import do Python",

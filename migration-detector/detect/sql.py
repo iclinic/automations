@@ -19,7 +19,7 @@ from typing import Callable
 
 from .severity import DUPLICATE, Finding, Severity, ref, worst
 
-__all__ = ["classify_sql", "classify_statement", "split_statements"]
+__all__ = ["classify_sql", "classify_statement", "looks_like_ddl", "split_statements"]
 
 # ---------------------------------------------------------------------------
 # Varredura léxica: literais, identificadores citados e comentários
@@ -80,6 +80,39 @@ def _strip_comments(sql: str) -> str:
     """Apaga comentários, preservando índices para o resto do módulo."""
     comments = [s for s in _spans(sql) if s[0] == "comment"]
     return _blank_out(sql, comments, " ")
+
+
+# Verbo de DDL seguido do objeto que ele opera, com espaço para os
+# qualificadores que cabem no meio — `CREATE UNIQUE INDEX`, `DROP TABLE IF
+# EXISTS`, `CREATE OR REPLACE VIEW`. O objeto é obrigatório porque o verbo
+# sozinho não distingue um statement de uma frase: "DROP everything is not what
+# this does" começa com `DROP` e é uma mensagem de erro.
+_DDL_VERBS = "ALTER|CREATE|DROP|RENAME|TRUNCATE"
+_DDL_OBJECTS = (
+    "TABLE|COLUMN|INDEX|TYPE|SEQUENCE|SCHEMA|VIEW|CONSTRAINT|DATABASE|TRIGGER|FUNCTION|EXTENSION"
+)
+_DDL_HEAD = re.compile(
+    rf"\s*(?:(?:{_DDL_VERBS})\s+(?:\w+\s+){{0,3}}?(?:{_DDL_OBJECTS})\b|COMMENT\s+ON\b)",
+    re.IGNORECASE,
+)
+
+
+def looks_like_ddl(sql: str) -> bool:
+    """A string tem cara de statement de DDL?
+
+    Portão de entrada para texto que não veio de um arquivo `.sql` nem de uma
+    chamada que promete SQL: o corpo de um `RunPython` do Django chega aqui com
+    todas as strings do arquivo dentro, mensagem de erro e nome de coluna
+    incluídos. Mandar tudo para `classify_statement` faria cada uma delas
+    voltar `unknown`, e todo `RunPython` com texto no corpo viraria pedido de
+    revisão manual.
+
+    Responder `True` não promete que `classify_statement` vai reconhecer o
+    statement — `ALTER TABLE ... CLUSTER ON` tem cara de DDL e não tem regra.
+    Essa é a diferença entre "isto é SQL de schema" e "eu sei o que este SQL
+    faz", e é ela que separa um `unknown` honesto de uma string ignorada.
+    """
+    return bool(_DDL_HEAD.match(_strip_comments(sql)))
 
 
 def _mask(sql: str) -> str:

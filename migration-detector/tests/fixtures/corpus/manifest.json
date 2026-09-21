@@ -157,9 +157,9 @@
   ],
   "django/bookings/migrations/0034_modify_external_id_to_non_null.py": [
     {
-      "operation": "RunPython",
-      "reason": "Migração de dados em Python — o classificador não lê o que a função faz. Confirmar o volume e o impacto com o time de dados.",
-      "severity": "controlled"
+      "operation": "MODIFY",
+      "reason": "Tipo da coluna `external_id` de `bookings_booking` alterado — quem lê o tipo antigo quebra.",
+      "severity": "breaking"
     },
     {
       "operation": "AlterField",
@@ -251,7 +251,7 @@
   "django/catalog/migrations/0006_backfill_titles.py": [
     {
       "operation": "RunPython",
-      "reason": "Migração de dados em Python — o classificador não lê o que a função faz. Confirmar o volume e o impacto com o time de dados.",
+      "reason": "Migração de dados em Python — nenhum DDL no corpo da função. Confirmar o volume e o impacto com o time de dados.",
       "severity": "controlled"
     }
   ],
@@ -391,9 +391,9 @@
   ],
   "django/subjects/migrations/0027_modify_external_id_to_non_null.py": [
     {
-      "operation": "RunPython",
-      "reason": "Migração de dados em Python — o classificador não lê o que a função faz. Confirmar o volume e o impacto com o time de dados.",
-      "severity": "controlled"
+      "operation": "MODIFY",
+      "reason": "Tipo da coluna `external_id` de `subjects_subject` alterado — quem lê o tipo antigo quebra.",
+      "severity": "breaking"
     },
     {
       "operation": "AlterField",
