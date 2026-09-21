@@ -218,8 +218,11 @@ def build_slack_text(
         # O cabeçalho acabou de dizer "Sem alteração de banco". A linha seguinte
         # dizia "Alteração de banco detectada.", e a mensagem se contradizia em
         # duas linhas.
+        # Arquivos, e não itens: um `.sql` com quatro statements rende quatro
+        # itens e continua sendo um arquivo. A linha fala de arquivo.
+        read = len({item.get("file") for item in items if item.get("file")})
         description = (
-            f"{len(items)} arquivo(s) de migração lido(s), nenhuma operação de banco."
+            f"{read} arquivo(s) de migração lido(s), nenhuma operação de banco."
         )
     else:
         description = "Alteração de banco detectada."

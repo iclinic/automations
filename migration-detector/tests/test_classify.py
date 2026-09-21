@@ -331,12 +331,16 @@ class TestBuildSlackText:
             "highest_severity": "none",
             "items": [
                 {"file": "a.sql", "severity": "none", "reason": "Controle de transação."},
-                {"file": "b.sql", "severity": "none", "reason": "Comentário de metadado."},
+                {"file": "a.sql", "severity": "none", "reason": "Ajuste de sessão."},
+                {"file": "a.sql", "severity": "none", "reason": "Comentário de metadado."},
+                {"file": "b.sql", "severity": "none", "reason": "Statement vazio."},
             ],
         }
         text = build_slack_text(result, "http://pr", "Title", "1", "author")
         assert "Alteração de banco detectada." not in text
-        assert "2" in text
+        # Dois arquivos, quatro operações. A linha fala de arquivo, então conta
+        # arquivo: um `.sql` com quatro statements não são quatro arquivos.
+        assert "2 arquivo(s)" in text
 
 
 class TestTheSlackTextHasABudget:
