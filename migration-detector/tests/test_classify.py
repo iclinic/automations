@@ -3,6 +3,7 @@ import json
 import os
 import pathlib
 import subprocess
+import textwrap
 import sys
 
 import pytest
@@ -396,6 +397,197 @@ class TestTheSlackTextHasABudget:
         assert len(text) < 3000
 
 
+class TestTheGlobMissIsNotSilence:
+    """Migração no diff que não casa glob nenhum não pode terminar verde.
+
+    A ADR 0001 põe esta regra na lista do que entra junto e não é negociável:
+    "arquivo no diff com cara de migração (...) que não case nenhum padrão de
+    `migration_paths` gera `::warning::` e entra na mensagem do Slack".
+
+    A severidade é `unknown` porque é literalmente o que aconteceu: existe um
+    arquivo com cara de migração que o classificador não leu. Dizer `none` seria
+    o mesmo silêncio que a Evidência 4 da ADR mede em quatro anos — "o PR não
+    tem migração" e "o glob não pegou a migração" são indistinguíveis para quem
+    lê o check verde.
+    """
+
+    def test_an_unmatched_file_is_unknown_and_not_none(self):
+        result = analyze([], ["db/migrate/20260904_add_column.rb"])
+        assert result["highest_severity"] == "unknown"
+        assert result["has_db_change"] is True
+
+    def test_the_item_names_the_file_the_glob_did_not_catch(self):
+        result = analyze([], ["db/migrate/20260904_add_column.rb"])
+        assert [item["file"] for item in result["items"]] == [
+            "db/migrate/20260904_add_column.rb"
+        ]
+        assert "migration_paths" in result["items"][0]["reason"]
+
+    def test_an_unmatched_file_outranks_a_classified_safe(self, tmp_path):
+        safe = tmp_path / "0001_add.sql"
+        safe.write_text("ALTER TABLE ledger ADD COLUMN memo varchar(8) NULL;", encoding="utf-8")
+        result = analyze([str(safe)], ["db/migrate/20260904_add_column.rb"])
+        assert result["highest_severity"] == "unknown"
+
+    def test_an_unmatched_file_never_hides_a_breaking(self, tmp_path):
+        drop = tmp_path / "0002_drop.sql"
+        drop.write_text("ALTER TABLE ledger DROP COLUMN memo;", encoding="utf-8")
+        result = analyze([str(drop)], ["db/migrate/20260904_add_column.rb"])
+        assert result["highest_severity"] == "breaking"
+
+    def test_the_unmatched_file_reaches_the_slack_message(self):
+        result = analyze([], ["db/migrate/20260904_add_column.rb"])
+        text = build_slack_text(result, "http://pr", "T", "1", "a")
+        assert "db/migrate/20260904_add_column.rb" in text
+
+    def test_the_step_runs_with_no_matched_file_when_something_was_missed(self, tmp_path):
+        process, outputs = _run_step(
+            tmp_path,
+            migration_files="",
+            unmatched_files="db/migrate/20260904_add_column.rb",
+        )
+        assert process.returncode == 0, process.stderr
+        assert "highest_severity=unknown" in outputs
+
+    def test_the_step_still_falls_when_nothing_at_all_arrives(self, tmp_path):
+        process, outputs = _run_step(tmp_path, migration_files="", unmatched_files="")
+        assert process.returncode != 0
+        assert outputs == ""
+
+
+def _collect_script() -> str:
+    """O corpo do step `Collect`, recortado do `action.yml`.
+
+    Recorte por texto e não por `yaml.safe_load` para não pendurar a suíte numa
+    dependência a mais — `requirements.txt` está vazio de propósito, e
+    `_action_inputs` já lê este arquivo assim.
+    """
+    lines = (ACTION_DIR / "action.yml").read_text(encoding="utf-8").splitlines()
+    start = next(i for i, line in enumerate(lines) if line.strip().startswith("- name: Collect |"))
+    body = next(i for i in range(start, len(lines)) if lines[i].strip() == "run: |")
+    end = next(
+        (i for i in range(body + 1, len(lines)) if lines[i].strip().startswith("- name:")),
+        len(lines),
+    )
+    return textwrap.dedent("\n".join(lines[body + 1 : end]))
+
+
+def _run_collect(tmp_path, *, changed: str, webhook: bool = True, paths: str | None = None):
+    """Roda o step `Collect` com um `git` de mentira no PATH.
+
+    O que este step decide não é testável por leitura: quem sai por onde, com
+    qual código de saída e com qual output publicado depende de sete caminhos
+    de `bash`. Um teste que procura `--diff-filter=d` no texto do arquivo
+    confere que a linha existe, não que ela decide alguma coisa.
+    """
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    git = fake_bin / "git"
+    git.write_text(
+        "#!/usr/bin/env bash\n"
+        'if [[ "$1" == "diff" ]]; then printf \'%s\' "$FAKE_DIFF"; exit 0; fi\n'
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    git.chmod(0o755)
+
+    script = tmp_path / "collect.sh"
+    script.write_text(_collect_script(), encoding="utf-8")
+    output = tmp_path / "github_output"
+    output.write_text("")
+
+    process = subprocess.run(
+        ["bash", str(script)],
+        env={
+            "PATH": f"{fake_bin}:{os.environ.get('PATH', '')}",
+            "GITHUB_OUTPUT": str(output),
+            "BASE_SHA": "a",
+            "HEAD_SHA": "b",
+            "MIGRATION_PATHS": paths or _action_inputs()["migration_paths"].split("default: '")[1].split("'")[0],
+            "IGNORE_TERMS": "dump",
+            "HAS_SLACK_WEBHOOK": "true" if webhook else "false",
+            "FAKE_DIFF": changed,
+        },
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    outputs = dict(
+        line.split("=", 1)
+        for line in output.read_text().splitlines()
+        if "=" in line
+    )
+    return process, outputs
+
+
+class TestCollectDecidesWhoGetsThrough:
+    """O step `Collect` executado, não lido.
+
+    Os três apontamentos que mexeram neste step — a guarda do webhook cedo
+    demais, o arquivo removido derrubando o classificador e o glob-miss
+    silencioso — são todos sobre qual caminho o `bash` toma, e nenhum deles
+    aparece numa asserção de texto.
+    """
+
+    def test_a_migration_that_matches_a_glob_goes_to_the_classifier(self, tmp_path):
+        process, outputs = _run_collect(
+            tmp_path, changed="django/app/x/migrations/0002_add.py\nREADME.md"
+        )
+        assert process.returncode == 0
+        assert outputs["has_files"] == "true"
+        assert outputs["migration_files"] == "django/app/x/migrations/0002_add.py"
+
+    def test_a_migration_no_glob_catches_becomes_a_warning_and_an_output(self, tmp_path):
+        process, outputs = _run_collect(
+            tmp_path, changed="db/migrate/20260904_add_column.rb\nREADME.md"
+        )
+        assert process.returncode == 0
+        assert outputs["has_files"] == "false"
+        assert outputs["unmatched_files"] == "db/migrate/20260904_add_column.rb"
+        assert "::warning::db/migrate/20260904_add_column.rb" in process.stdout
+
+    def test_a_pr_without_migration_says_nothing(self, tmp_path):
+        process, outputs = _run_collect(tmp_path, changed="README.md")
+        assert process.returncode == 0
+        assert outputs == {"has_files": "false"}
+        assert "::warning::" not in process.stdout
+
+    def test_without_a_webhook_a_pr_without_migration_still_passes(self, tmp_path):
+        """A guarda era a primeira coisa do step, antes do `git diff`: um
+        repositório sem a variable configurada tinha *todo* PR vermelho,
+        inclusive o de um `README.md`."""
+        process, outputs = _run_collect(tmp_path, changed="README.md", webhook=False)
+        assert process.returncode == 0
+        assert outputs["has_files"] == "false"
+        assert "::warning::slack_webhook_url" in process.stdout
+
+    def test_without_a_webhook_a_pr_with_migration_fails(self, tmp_path):
+        """O outro lado da mesma guarda: classificar sem ter para onde avisar é
+        o silêncio que fez a falha da API de IA rodar quatro semanas."""
+        process, _ = _run_collect(
+            tmp_path, changed="django/app/x/migrations/0002_add.py", webhook=False
+        )
+        assert process.returncode == 1
+        assert "::error::slack_webhook_url" in process.stderr + process.stdout
+
+    def test_without_a_webhook_a_glob_miss_also_fails(self, tmp_path):
+        process, _ = _run_collect(
+            tmp_path, changed="db/migrate/20260904_add_column.rb", webhook=False
+        )
+        assert process.returncode == 1
+
+    def test_a_file_the_ignore_term_ate_leaves_a_warning(self, tmp_path):
+        process, outputs = _run_collect(tmp_path, changed="sql/backup_dump.sql")
+        assert process.returncode == 0
+        assert outputs["has_files"] == "false"
+        assert "ignore_name_contains" in process.stdout
+
+    def test_an_empty_diff_publishes_has_files_false(self, tmp_path):
+        process, outputs = _run_collect(tmp_path, changed="")
+        assert process.returncode == 0
+        assert outputs == {"has_files": "false"}
+
+
 # ---------------------------------------------------------------------------
 # write_github_outputs
 # ---------------------------------------------------------------------------
@@ -648,7 +840,7 @@ class TestAnalyze:
 # ---------------------------------------------------------------------------
 
 
-def _run_step(tmp_path, *, migration_files: str):
+def _run_step(tmp_path, *, migration_files: str, unmatched_files: str = ""):
     """Executa o step como o action.yml executa. Devolve (processo, outputs)."""
     output = tmp_path / "github_output"
     output.write_text("")
@@ -656,6 +848,7 @@ def _run_step(tmp_path, *, migration_files: str):
         "PATH": os.environ.get("PATH", ""),
         "GITHUB_OUTPUT": str(output),
         "MIGRATION_FILES": migration_files,
+        "UNMATCHED_FILES": unmatched_files,
         "PR_URL": "http://example.com/pr/7",
         "PR_TITLE": "Backfill",
         "PR_NUMBER": "7",
@@ -689,7 +882,7 @@ def _run_step_with_analyze(tmp_path, result_literal: str):
         "import sys\n"
         f"sys.path.insert(0, {str(ACTION_DIR)!r})\n"
         "import classify\n"
-        f"classify.analyze = lambda files: {result_literal}\n"
+        f"classify.analyze = lambda files, unmatched=(): {result_literal}\n"
         "classify.main()\n"
     )
     env = {
@@ -937,6 +1130,30 @@ class TestActionContract:
         # que não pode sobrar é um step que o execute.
         assert "pip install" not in _action_run_lines()
 
+    def test_a_pr_that_only_removes_a_migration_does_not_break_the_step(self):
+        """`git diff --name-only` lista o arquivo removido, o classificador
+        tenta abri-lo e o step morre sem `except` — e o step do Slack nem roda,
+        porque step seguinte não roda depois de step falho. O check fica
+        vermelho e o time de dados não recebe nada."""
+        assert "--diff-filter=d" in _action_run_lines()
+
+    def test_a_migration_outside_the_glob_leaves_a_trace(self):
+        """A regra que a ADR põe na lista do que não é negociável: arquivo com
+        cara de migração que nenhum glob casou vira `::warning::` e entra na
+        mensagem do Slack. Sem ela, "o PR não tem migração" e "o glob não pegou
+        a migração" continuam indistinguíveis."""
+        run = _action_run_lines()
+        assert "unmatched_files" in run
+        assert "alembic/versions" in run
+        assert "UNMATCHED_FILES" in run
+
+    def test_the_slack_step_runs_for_a_glob_miss_too(self):
+        """O aviso que só existe no log do job é o mesmo silêncio de antes."""
+        run = _action_run_lines()
+        slack = run[run.index("Notify | Post to Slack"):]
+        condition = slack[: slack.index("shell:")]
+        assert "unmatched" in condition
+
     def test_setup_python_survives(self):
         # O classificador é Python: este step fica.
         assert "actions/setup-python" in (ACTION_DIR / "action.yml").read_text(encoding="utf-8")
@@ -1066,7 +1283,7 @@ class TestMainIsTheStep:
         migration.write_text("ALTER TABLE ledger ADD COLUMN memo varchar(8) NULL;", encoding="utf-8")
         self._env(monkeypatch, MIGRATION_FILES=str(migration))
 
-        def broken(files):
+        def broken(files, unmatched=()):
             return {"has_db_change": True, "highest_severity": "amarelo", "items": []}
 
         monkeypatch.setattr(classify, "analyze", broken)

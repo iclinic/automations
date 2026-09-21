@@ -137,25 +137,73 @@ runs:
         HAS_SLACK_WEBHOOK: ${{ inputs.slack_webhook_url != '' }}
       run: |
         set -euo pipefail
-        # Sem webhook a action não tem para onde avisar. Sair 0 aqui deixava o job
-        # verde sem ter classificado nada e sem ninguém receber mensagem — o mesmo
-        # silêncio que fez a falha da API de IA rodar quatro semanas sem aparecer.
-        if [[ "$HAS_SLACK_WEBHOOK" != "true" ]]; then
-          echo "::error::slack_webhook_url não configurada. A action não classifica sem ter para onde notificar."
-          exit 1
-        fi
+
+        # Arquivo do diff com cara de migração: sob `migrations/` ou
+        # `alembic/versions/`, ou com nome prefixado por timestamp. É a regra
+        # que a ADR 0001 põe na lista do que não é negociável, e ela fecha a
+        # classe que o `**/migrations/*.ts` do default fecha só para um caso.
+        # A extensão entra na regex para não transformar `assets/20240101_logo.png`
+        # em suspeita de migração.
+        SUSPECT_REGEX='(^|/)(migrations|alembic/versions)/[^/]*\.(py|ts|js|rb|sql|php)$|(^|/)[0-9]{8,}[-_][^/]*\.(py|ts|js|rb|sql|php)$'
+
+        # Toda saída do step passa por aqui. A guarda do webhook depende de o PR
+        # ter migração ou não, e uma saída que a pulasse publicaria `has_files`
+        # sem ter checado para onde avisar.
+        finish() {
+          local matched="$1" unmatched="$2"
+
+          # Sem webhook a action não tem para onde avisar. Reprovar o PR aqui é
+          # o remédio certo quando há migração — sair 0 é o mesmo silêncio que
+          # fez a falha da API de IA rodar quatro semanas. Mas a guarda ficava
+          # antes do `git diff`, e um repositório sem a variable configurada
+          # tinha *todo* PR vermelho, inclusive o de um `README.md`. A ADR
+          # autorizou `::warning::` neste caminho, não reprovar quem não toca
+          # em banco.
+          if [[ "$HAS_SLACK_WEBHOOK" != "true" ]]; then
+            if [[ -n "$matched" || -n "$unmatched" ]]; then
+              echo "::error::slack_webhook_url não configurada e este PR tem migração. A action não classifica sem ter para onde notificar."
+              exit 1
+            fi
+            echo "::warning::slack_webhook_url não configurada. Enquanto ela faltar, migração neste repositório passa sem aviso."
+          fi
+
+          if [[ -n "$unmatched" ]]; then
+            while IFS= read -r file; do
+              [[ -z "$file" ]] && continue
+              echo "::warning::$file tem cara de migração e não casou nenhum padrão de \`migration_paths\`. O classificador não o leu."
+            done <<< "$unmatched"
+            echo "unmatched_files=$(echo "$unmatched" | tr '\n' '|' | sed 's/|$//')" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [[ -n "$matched" ]]; then
+            echo "==> Arquivos de migração candidatos:"
+            echo "$matched"
+            echo "migration_files=$(echo "$matched" | tr '\n' '|' | sed 's/|$//')" >> "$GITHUB_OUTPUT"
+            echo "has_files=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_files=false" >> "$GITHUB_OUTPUT"
+          fi
+          exit 0
+        }
 
         echo "==> Coletando arquivos alterados entre $BASE_SHA e $HEAD_SHA"
 
-        if ! CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA"); then
+        # `--diff-filter=d` tira do diff o arquivo que o PR removeu. Ele existe
+        # no nome e não existe no disco: o classificador tentava abri-lo, o step
+        # morria de `FileNotFoundError` — de propósito, porque o `except` genérico
+        # saiu desta entrega — e o step do Slack nem chegava a rodar, porque step
+        # seguinte não roda depois de step falho. Um PR que reverte migração
+        # ficava vermelho e o time de dados não recebia nada. Remover o arquivo
+        # de migração do repositório não desfaz o que já rodou no banco, então
+        # não é mudança de schema a classificar.
+        if ! CHANGED=$(git diff --name-only --diff-filter=d "$BASE_SHA" "$HEAD_SHA"); then
           echo "::error::Não foi possível calcular diff entre BASE_SHA e HEAD_SHA"
           exit 1
         fi
 
         if [[ -z "$CHANGED" ]]; then
           echo "Nenhum arquivo alterado encontrado."
-          echo "has_files=false" >> "$GITHUB_OUTPUT"
-          exit 0
+          finish "" ""
         fi
 
         echo "==> Todos os arquivos alterados no PR:"
@@ -213,10 +261,24 @@ runs:
           exit 1
         fi
 
+        # O que tem cara de migração e nenhum glob pegou. Calculado sobre
+        # `FILTERED`, e não sobre `FINAL`: arquivo que o termo de exclusão
+        # comeu casou um glob, e sai avisado logo abaixo por outro caminho.
+        #
+        # `grep -v '^$'` na lista de padrões não é enfeite: linha vazia é padrão
+        # que casa tudo, e sem ele um `FILTERED` vazio zeraria a lista de
+        # suspeitos justamente no caso em que ela importa.
+        SUSPECT=$(echo "$CHANGED" | grep -E "$SUSPECT_REGEX" || true)
+        UNMATCHED=$(
+          echo "$SUSPECT" \
+            | grep -v '^$' \
+            | grep -vxF -f <(printf '%s\n' "$FILTERED" | grep -v '^$') \
+            || true
+        )
+
         if [[ -z "$FILTERED" ]]; then
           echo "Nenhum arquivo de migração encontrado após filtro de inclusão."
-          echo "has_files=false" >> "$GITHUB_OUTPUT"
-          exit 0
+          finish "" "$UNMATCHED"
         fi
 
         # Remove arquivos cujo nome contenha os termos de exclusão (ex.: dump)
@@ -237,25 +299,35 @@ runs:
 
         FINAL=$(echo "$FINAL" | grep -v "^$" | sort -u || true)
 
-        if [[ -z "$FINAL" ]]; then
-          echo "Todos os arquivos encontrados foram ignorados (ex.: dump)."
-          echo "has_files=false" >> "$GITHUB_OUTPUT"
-          exit 0
+        # O termo de exclusão existe para dump local, e casa por substring do
+        # nome inteiro. Um `ignore_name_contains` mal escolhido come migração de
+        # verdade e some com ela sem deixar rastro — o mesmo silêncio do
+        # glob-miss, por outra porta. Aqui ele deixa rastro.
+        IGNORED=$(
+          echo "$FILTERED" \
+            | grep -v '^$' \
+            | grep -vxF -f <(printf '%s\n' "$FINAL" | grep -v '^$') \
+            || true
+        )
+        if [[ -n "$IGNORED" ]]; then
+          while IFS= read -r file; do
+            [[ -z "$file" ]] && continue
+            echo "::warning::$file casou \`migration_paths\` e foi descartado por \`ignore_name_contains\`. O classificador não o leu."
+          done <<< "$IGNORED"
         fi
 
-        echo "==> Arquivos de migração candidatos:"
-        echo "$FINAL"
+        if [[ -z "$FINAL" ]]; then
+          echo "Todos os arquivos encontrados foram ignorados (ex.: dump)."
+          finish "" "$UNMATCHED"
+        fi
 
-        # Serializa lista com delimitador | para passar via output
-        ENCODED=$(echo "$FINAL" | tr '\n' '|' | sed 's/|$//')
-        echo "migration_files=$ENCODED" >> "$GITHUB_OUTPUT"
-        echo "has_files=true" >> "$GITHUB_OUTPUT"
+        finish "$FINAL" "$UNMATCHED"
 
     # -------------------------------------------------------------------------
     # 2. Prepara ambiente Python
     # -------------------------------------------------------------------------
     - name: Setup | Python
-      if: steps.collect.outputs.has_files == 'true'
+      if: steps.collect.outputs.has_files == 'true' || steps.collect.outputs.unmatched_files != ''
       uses: actions/setup-python@v5
       with:
         python-version: '3.12'
@@ -277,10 +349,11 @@ runs:
     # -------------------------------------------------------------------------
     - name: Analyze | Classify migrations
       id: analyze
-      if: steps.collect.outputs.has_files == 'true'
+      if: steps.collect.outputs.has_files == 'true' || steps.collect.outputs.unmatched_files != ''
       shell: bash
       env:
         MIGRATION_FILES: ${{ steps.collect.outputs.migration_files }}
+        UNMATCHED_FILES: ${{ steps.collect.outputs.unmatched_files }}
         PR_URL: ${{ github.event.pull_request.html_url }}
         PR_TITLE: ${{ github.event.pull_request.title }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -294,7 +367,7 @@ runs:
     # -------------------------------------------------------------------------
     - name: Outputs | No migration files found
       id: no-change
-      if: steps.collect.outputs.has_files == 'false'
+      if: steps.collect.outputs.has_files != 'true' && steps.collect.outputs.unmatched_files == ''
       shell: bash
       run: |
         set -euo pipefail
@@ -333,7 +406,7 @@ runs:
     # -------------------------------------------------------------------------
     - name: Notify | Post to Slack
       id: slack
-      if: steps.collect.outputs.has_files == 'true'
+      if: steps.collect.outputs.has_files == 'true' || steps.collect.outputs.unmatched_files != ''
       shell: bash
       env:
         SLACK_WEBHOOK_URL: ${{ inputs.slack_webhook_url }}

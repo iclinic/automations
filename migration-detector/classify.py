@@ -38,6 +38,18 @@ logger = get_logger(__name__)
 # que "li e não achei nada" se distingue de "esqueci deste arquivo".
 NOTHING_TO_REPORT = "Nenhuma operação de banco encontrada neste arquivo."
 
+# Arquivo do diff com cara de migração que nenhum padrão de `migration_paths`
+# casou. Ele não foi classificado, e é isso que a linha diz: `unknown` é
+# literalmente "existe uma migração aqui e eu não a li". Publicar `none`
+# tornaria "o PR não tem migração" indistinguível de "o glob não pegou a
+# migração", que é a Evidência 4 da ADR — quatro anos de silêncio no
+# consumidor TypeORM.
+NOT_MATCHED = (
+    "Arquivo com cara de migração que nenhum padrão de `migration_paths` casou — "
+    "o classificador não o leu. Ajuste `migration_paths` no workflow ou confirme "
+    "com o time de dados."
+)
+
 
 # O `text` de um attachment do Slack corta bem antes do que uma lista sem
 # limite ocupa: 25 findings com razão de tamanho realista dão mais de 4.500
@@ -59,7 +71,7 @@ MAX_DESCRIPTION_CHARS = 2200
 # ------------------------------------------------------------------
 
 
-def analyze(files: list[str]) -> dict:
+def analyze(files: list[str], unmatched: list[str] | None = None) -> dict:
     """Classifica cada arquivo e agrega o resultado do PR.
 
     Um item por `Finding`, mais um item `none` para cada arquivo que não rendeu
@@ -97,6 +109,17 @@ def analyze(files: list[str]) -> dict:
                     "reason": NOTHING_TO_REPORT,
                 }
             )
+
+    for path in unmatched or []:
+        logger.warning(f"  [?] {path} — nenhum padrão de `migration_paths` casou")
+        items.append(
+            {
+                "file": path,
+                "severity": Severity.UNKNOWN.value,
+                "operation": "migration_paths",
+                "reason": NOT_MATCHED,
+            }
+        )
 
     severity = max_severity(item["severity"] for item in items)
     return {
@@ -241,27 +264,36 @@ def write_github_outputs(
 # ------------------------------------------------------------------
 
 
-def main() -> None:
-    files_raw = os.environ.get("MIGRATION_FILES", "")
-    files = [f.strip() for f in files_raw.split("|") if f.strip()]
+def _listed(variable: str) -> list[str]:
+    """A lista serializada com `|` que o `action.yml` passa por ambiente."""
+    return [item.strip() for item in os.environ.get(variable, "").split("|") if item.strip()]
 
-    # Este step só roda com `has_files == 'true'`. Chegar aqui sem arquivo
-    # significa que a coleta e a classificação discordam, e o único jeito de
-    # terminar seria publicar `none` — um verde que ninguém classificou.
-    if not files:
+
+def main() -> None:
+    files = _listed("MIGRATION_FILES")
+    unmatched = _listed("UNMATCHED_FILES")
+
+    # Este step roda com `has_files == 'true'` ou com arquivo suspeito que o
+    # glob não pegou. Chegar aqui sem nenhum dos dois significa que a coleta e a
+    # classificação discordam, e o único jeito de terminar seria publicar
+    # `none` — um verde que ninguém classificou.
+    if not files and not unmatched:
         raise SystemExit(
             "[ERRO] MIGRATION_FILES vazia no step de classificação. "
             "A coleta disse que havia arquivos de migração e nenhum chegou aqui."
         )
 
-    logger.info(f"==> Classificando {len(files)} arquivo(s) de migração")
+    logger.info(
+        f"==> Classificando {len(files)} arquivo(s) de migração"
+        + (f", mais {len(unmatched)} fora do glob" if unmatched else "")
+    )
 
     # Sem try/except. Qualquer falha daqui para baixo — leitura, dispatch,
     # parse, severidade fora da tabela — derruba o step. Era o `except
     # Exception` com fallback que fazia a GitHub Models API responder 404 por
     # quatro semanas com o job verde e o Slack recebendo `controlled` para todo
     # mundo.
-    result = analyze(files)
+    result = analyze(files, unmatched)
     logger.info(f"==> Classificação:\n{json.dumps(result, ensure_ascii=False, indent=2)}")
 
     try:
