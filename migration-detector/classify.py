@@ -24,6 +24,7 @@ from detect.severity import (
     max_severity,
     presentation,
     ref,
+    severity_rank,
     to_severity,
 )
 from gha_logger import get_logger
@@ -36,6 +37,21 @@ logger = get_logger(__name__)
 # `.sql` só com `BEGIN; COMMIT;`. Ele continua aparecendo em `items` — é assim
 # que "li e não achei nada" se distingue de "esqueci deste arquivo".
 NOTHING_TO_REPORT = "Nenhuma operação de banco encontrada neste arquivo."
+
+
+# O `text` de um attachment do Slack corta bem antes do que uma lista sem
+# limite ocupa: 25 findings com razão de tamanho realista dão mais de 4.500
+# caracteres. A `main` tinha dois limites implícitos — `MAX_FILE_BYTES` na
+# leitura e `max_tokens` na resposta do modelo — e os dois saíram junto com o
+# provedor de IA, sem substituto.
+#
+# O corte é por linha e por caractere, e vem depois da ordenação por gravidade:
+# o que cai fora é sempre o mais brando. Cortar na ordem do arquivo deixaria um
+# `breaking` de fora para caber um `safe`, que é o oposto do que a mensagem
+# existe para fazer. Nada se perde: `analysis_json` continua com a lista
+# inteira no log do job.
+MAX_LINES = 20
+MAX_DESCRIPTION_CHARS = 2200
 
 
 # ------------------------------------------------------------------
@@ -141,16 +157,49 @@ def build_slack_text(
     citar um statement — migração de dados carrega CPF de paciente e este texto
     vai para um canal do Slack.
     """
-    meta = presentation(severity_of(result))
+    severity = severity_of(result)
+    meta = presentation(severity)
 
     items = result.get("items") or []
+    reported = sorted(
+        (
+            item
+            for item in items
+            if item.get("reason") and item.get("severity") != Severity.NONE.value
+        ),
+        key=lambda item: severity_rank(to_severity(item.get("severity"))),
+        reverse=True,
+    )
     lines = [
         f"• {ref(item.get('file') or '')} — {ref(item.get('operation') or '')}: {item['reason']}"
-        for item in items
-        if item.get("reason") and item.get("severity") != Severity.NONE.value
+        for item in reported
     ]
 
-    description = "\n".join(lines) if lines else "Alteração de banco detectada."
+    kept: list[str] = []
+    used = 0
+    for line in lines:
+        if len(kept) >= MAX_LINES or used + len(line) > MAX_DESCRIPTION_CHARS:
+            break
+        kept.append(line)
+        used += len(line) + 1
+    left = len(lines) - len(kept)
+    if left:
+        kept.append(
+            f"…e mais {left} operação(ões) classificada(s) — "
+            "ver `analysis_json` no log do job."
+        )
+
+    if kept:
+        description = "\n".join(kept)
+    elif severity is Severity.NONE:
+        # O cabeçalho acabou de dizer "Sem alteração de banco". A linha seguinte
+        # dizia "Alteração de banco detectada.", e a mensagem se contradizia em
+        # duas linhas.
+        description = (
+            f"{len(items)} arquivo(s) de migração lido(s), nenhuma operação de banco."
+        )
+    else:
+        description = "Alteração de banco detectada."
 
     return (
         f"{meta.emoji} *{meta.label}* {meta.headline}\n"

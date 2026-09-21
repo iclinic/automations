@@ -322,6 +322,79 @@ class TestBuildSlackText:
         text = build_slack_text(result, "http://pr", "Title", "1", "author")
         assert "Alteração de banco detectada." in text
 
+    def test_none_does_not_announce_a_change_it_just_said_there_was_not(self):
+        """O cabeçalho ⚪ diz "Sem alteração de banco" e a linha seguinte dizia
+        "Alteração de banco detectada." — a mensagem se contradizia em duas
+        linhas."""
+        result = {
+            "highest_severity": "none",
+            "items": [
+                {"file": "a.sql", "severity": "none", "reason": "Controle de transação."},
+                {"file": "b.sql", "severity": "none", "reason": "Comentário de metadado."},
+            ],
+        }
+        text = build_slack_text(result, "http://pr", "Title", "1", "author")
+        assert "Alteração de banco detectada." not in text
+        assert "2" in text
+
+
+class TestTheSlackTextHasABudget:
+    """Uma linha por finding, sem corte, estoura o attachment do Slack.
+
+    A `main` tinha dois limites implícitos — `MAX_FILE_BYTES` na leitura e
+    `max_tokens` na resposta do modelo — e os dois saíram junto com o provedor,
+    sem substituto. 25 findings com razão de tamanho realista dão mais de 4.500
+    caracteres, e o que cai fora do corte do Slack pode ser justamente o
+    `breaking`.
+    """
+
+    @staticmethod
+    def _result(severities):
+        return {
+            "highest_severity": max_severity(severities).value,
+            "items": [
+                {
+                    "file": f"db/migration_{i:03}.py",
+                    "severity": severity,
+                    "operation": "DROP COLUMN",
+                    "reason": "Coluna `x` removida de `t` — quem lê essa coluna quebra.",
+                }
+                for i, severity in enumerate(severities)
+            ],
+        }
+
+    def test_a_long_list_is_cut_and_says_how_much_was_left_out(self):
+        result = self._result(["breaking"] * 40)
+        text = build_slack_text(result, "http://pr", "T", "1", "a")
+        assert text.count("• ") < 40
+        assert "ver `analysis_json`" in text
+
+    def test_a_short_list_is_not_cut_and_says_nothing_about_it(self):
+        result = self._result(["breaking"] * 3)
+        text = build_slack_text(result, "http://pr", "T", "1", "a")
+        assert text.count("• ") == 3
+        assert "analysis_json" not in text
+
+    def test_the_cut_never_drops_a_breaking_while_keeping_a_safe(self):
+        # O `breaking` é o último item da lista: na ordem do arquivo ele seria
+        # o primeiro a cair.
+        result = self._result(["safe"] * 40 + ["breaking"])
+        text = build_slack_text(result, "http://pr", "T", "1", "a")
+        assert "migration_040.py" in text
+
+    def test_the_hardest_severity_comes_first(self):
+        result = self._result(["safe", "breaking", "controlled"])
+        text = build_slack_text(result, "http://pr", "T", "1", "a")
+        bullets = [line for line in text.splitlines() if line.startswith("• ")]
+        assert "migration_001.py" in bullets[0]
+        assert "migration_002.py" in bullets[1]
+        assert "migration_000.py" in bullets[2]
+
+    def test_the_description_stays_within_the_budget(self):
+        result = self._result(["breaking"] * 200)
+        text = build_slack_text(result, "http://pr", "T", "1", "a")
+        assert len(text) < 3000
+
 
 # ---------------------------------------------------------------------------
 # write_github_outputs
