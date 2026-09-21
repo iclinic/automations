@@ -741,11 +741,22 @@ class TestTheRealCorpus:
     """
 
     @pytest.mark.parametrize("stack", sorted(REAL_CORPUS))
-    def test_the_repository_still_has_the_number_of_migrations_measured(self, stack):
+    def test_the_repository_did_not_lose_the_migrations_measured(self, stack):
+        """O repositório não encolhe, e cresce o tempo todo.
+
+        `==` contra a contagem de um repositório externo põe a suíte vermelha
+        na máquina de quem tem os três clones toda vez que um consumidor
+        mergeia uma migração — o consumidor Django já está em 599 contra os 591
+        da medição da ADR, sem que nenhuma delas tenha mexido na classificação.
+        O que este teste protege é o outro lado: o glob parar de casar o que
+        casava. Quem guarda a qualidade da classificação é o `<=` de
+        `test_the_determinism_rate_did_not_fall`, que é o número que só pode
+        piorar.
+        """
         files = _real_files(stack)
         if not files:
             pytest.skip(_why_it_skipped(stack))
-        assert len(files) == REAL_CORPUS[stack]["files"]
+        assert len(files) >= REAL_CORPUS[stack]["files"]
 
     @pytest.mark.parametrize("stack", sorted(REAL_CORPUS))
     def test_the_determinism_rate_did_not_fall(self, stack):
