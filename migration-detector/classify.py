@@ -51,19 +51,32 @@ NOT_MATCHED = (
 )
 
 
-# O `text` de um attachment do Slack corta bem antes do que uma lista sem
-# limite ocupa: 25 findings com razão de tamanho realista dão mais de 4.500
-# caracteres. A `main` tinha dois limites implícitos — `MAX_FILE_BYTES` na
-# leitura e `max_tokens` na resposta do modelo — e os dois saíram junto com o
-# provedor de IA, sem substituto.
+# O Slack colapsa o texto do attachment por volta de 700 caracteres, com um
+# "Mostrar mais" que abre o resto. Medido nas mensagens reais dos cinco PRs de
+# `iclinic/testes-gpi`: das 12 linhas do PR #73, três apareciam sem clicar. O
+# conteúdo não se perde — mas quem só passa o olho vê um quarto do PR, e por
+# isso a mensagem diz a própria forma numa linha de resumo logo abaixo do
+# cabeçalho, que sempre cabe nesse trecho.
 #
-# O corte é por linha e por caractere, e vem depois da ordenação por gravidade:
-# o que cai fora é sempre o mais brando. Cortar na ordem do arquivo deixaria um
-# `breaking` de fora para caber um `safe`, que é o oposto do que a mensagem
-# existe para fazer. Nada se perde: `analysis_json` continua com a lista
-# inteira no log do job.
-MAX_LINES = 20
-MAX_DESCRIPTION_CHARS = 2200
+# O corte aqui é outro problema, e o primeiro que entrou neste arquivo era a
+# nova forma do bug que esta entrega conserta: num PR com 14 operações todas
+# `breaking`, um orçamento por caractere descartou duas — um `CREATE UNIQUE
+# INDEX` e um `DROP TABLE`, que nunca chegaram ao time de dados.
+#
+# Ordenar por gravidade decrescente não cobre esse caso: quando tudo tem a
+# mesma gravidade, a ordenação não separa nada. A regra é explícita — o que
+# trava o merge nunca é cortado. `unknown` e `breaking` entram inteiros, e o
+# orçamento vale para as severidades que não param ninguém.
+BENIGN_BUDGET_CHARS = 1800
+
+# Teto do attachment do Slack, que é dele e não nosso. Passar dele não entrega
+# mais informação: entrega menos, porque a mensagem é truncada do lado de lá,
+# onde nada avisa que foi.
+MAX_TEXT_CHARS = 7000
+
+# Espaço guardado para a linha de "…e mais N", que só existe depois de saber
+# quantas ficaram de fora.
+_OVERFLOW_ALLOWANCE = 80
 
 
 # ------------------------------------------------------------------
@@ -160,6 +173,26 @@ def confidence_for(severity: Severity | str) -> float:
     return 0.0 if to_severity(severity) is Severity.UNKNOWN else 1.0
 
 
+def _summary(reported: list[dict], items: list[dict]) -> str:
+    """A forma do PR em uma linha, para quem não clica em "Mostrar mais".
+
+    Vem antes da linha do PR de propósito: o título do PR é longo e variável, e
+    o resumo tem que caber no trecho que o Slack mostra sem interação. Sem item
+    reportado não há forma a resumir, e a linha some — é o caso do ⚪, cuja
+    descrição já diz quantos arquivos foram lidos.
+    """
+    if not reported:
+        return ""
+    counts: dict[Severity, int] = {}
+    for item in reported:
+        found = to_severity(item.get("severity"))
+        counts[found] = counts.get(found, 0) + 1
+    ordered = sorted(counts, key=severity_rank, reverse=True)
+    shape = ", ".join(f"{counts[found]} {found.value}" for found in ordered)
+    files = len({item.get("file") for item in items if item.get("file")})
+    return f"*{len(reported)} operação(ões) em {files} arquivo(s):* {shape}\n"
+
+
 def build_slack_text(
     result: dict,
     pr_url: str,
@@ -193,24 +226,39 @@ def build_slack_text(
         key=lambda item: severity_rank(to_severity(item.get("severity"))),
         reverse=True,
     )
-    lines = [
-        f"• {ref(item.get('file') or '')} — {ref(item.get('operation') or '')}: {item['reason']}"
-        for item in reported
-    ]
 
+    summary = _summary(reported, items)
+    headline = f"{meta.emoji} *{meta.label}* {meta.headline}\n"
+    pr_line = f"*PR:* <{pr_url}|#{pr_number} — {pr_title}> por @{pr_author}\n"
+    footer = f"<{pr_url}|Ver PR para detalhes>"
+    # O teto é da mensagem inteira, e não da lista: cabeçalho, resumo, linha do
+    # PR, rodapé e a linha de overflow ocupam lugar no mesmo attachment. Medir
+    # só as linhas deixava a mensagem passar do teto por essa diferença.
+    ceiling = MAX_TEXT_CHARS - (
+        len(headline) + len(summary) + len(pr_line) + len(footer) + _OVERFLOW_ALLOWANCE
+    )
+
+    blocks = severity_rank(Severity.UNKNOWN)
     kept: list[str] = []
     used = 0
-    for line in lines:
-        if len(kept) >= MAX_LINES or used + len(line) > MAX_DESCRIPTION_CHARS:
+    for item in reported:
+        line = (
+            f"• {ref(item.get('file') or '')} — "
+            f"{ref(item.get('operation') or '')}: {item['reason']}"
+        )
+        blocking = severity_rank(to_severity(item.get("severity"))) >= blocks
+        # A lista vem do pior para o mais brando, então o primeiro benigno que
+        # não couber garante que nenhum dos seguintes cabe.
+        if not blocking and used + len(line) + 1 > BENIGN_BUDGET_CHARS:
+            break
+        if used + len(line) + 1 > ceiling:
             break
         kept.append(line)
         used += len(line) + 1
-    left = len(lines) - len(kept)
+
+    left = len(reported) - len(kept)
     if left:
-        kept.append(
-            f"…e mais {left} operação(ões) classificada(s) — "
-            "ver `analysis_json` no log do job."
-        )
+        kept.append(f"…e mais {left} operação(ões) — ver o PR.")
 
     if kept:
         description = "\n".join(kept)
@@ -218,6 +266,7 @@ def build_slack_text(
         # O cabeçalho acabou de dizer "Sem alteração de banco". A linha seguinte
         # dizia "Alteração de banco detectada.", e a mensagem se contradizia em
         # duas linhas.
+        #
         # Arquivos, e não itens: um `.sql` com quatro statements rende quatro
         # itens e continua sendo um arquivo. A linha fala de arquivo.
         read = len({item.get("file") for item in items if item.get("file")})
@@ -227,12 +276,7 @@ def build_slack_text(
     else:
         description = "Alteração de banco detectada."
 
-    return (
-        f"{meta.emoji} *{meta.label}* {meta.headline}\n"
-        f"*PR:* <{pr_url}|#{pr_number} — {pr_title}> por @{pr_author}\n"
-        f"{description}\n"
-        f"<{pr_url}|Ver PR para detalhes>"
-    )
+    return f"{headline}{summary}{pr_line}{description}\n{footer}"
 
 
 # ------------------------------------------------------------------

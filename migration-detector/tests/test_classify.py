@@ -344,13 +344,20 @@ class TestBuildSlackText:
 
 
 class TestTheSlackTextHasABudget:
-    """Uma linha por finding, sem corte, estoura o attachment do Slack.
+    """O corte não pode ser a nova forma do bug que esta entrega conserta.
 
-    A `main` tinha dois limites implícitos — `MAX_FILE_BYTES` na leitura e
-    `max_tokens` na resposta do modelo — e os dois saíram junto com o provedor,
-    sem substituto. 25 findings com razão de tamanho realista dão mais de 4.500
-    caracteres, e o que cai fora do corte do Slack pode ser justamente o
-    `breaking`.
+    Uma lista sem limite estoura o attachment do Slack, e a `main` tinha dois
+    limites implícitos — `MAX_FILE_BYTES` na leitura e `max_tokens` na resposta
+    do modelo — que saíram junto com o provedor. Mas o primeiro corte que
+    entrou aqui era por caractere, e num PR com 14 operações todas `breaking`
+    ele descartou duas: um `CREATE UNIQUE INDEX` e um `DROP TABLE`. Medido na
+    mensagem real do PR #73 de `iclinic/testes-gpi`.
+
+    Ordenar por gravidade decrescente não resolve esse caso — quando tudo tem a
+    mesma gravidade, a ordenação não separa nada. O que resolve é a regra
+    explícita: **o que trava o merge nunca é cortado.** `unknown` e `breaking`
+    entram inteiros; o orçamento vale para as severidades que não param
+    ninguém.
     """
 
     @staticmethod
@@ -368,24 +375,41 @@ class TestTheSlackTextHasABudget:
             ],
         }
 
-    def test_a_long_list_is_cut_and_says_how_much_was_left_out(self):
+    def test_no_breaking_is_ever_left_out(self):
         result = self._result(["breaking"] * 40)
         text = build_slack_text(result, "http://pr", "T", "1", "a")
-        assert text.count("• ") < 40
-        assert "ver `analysis_json`" in text
+        assert text.count("• ") == 40
+        assert "e mais" not in text
 
-    def test_a_short_list_is_not_cut_and_says_nothing_about_it(self):
-        result = self._result(["breaking"] * 3)
+    def test_no_unknown_is_ever_left_out(self):
+        """`unknown` trava o merge pelo mesmo motivo que `breaking`: ninguém do
+        time de dados olhou ainda."""
+        result = self._result(["unknown"] * 40)
         text = build_slack_text(result, "http://pr", "T", "1", "a")
-        assert text.count("• ") == 3
-        assert "analysis_json" not in text
+        assert text.count("• ") == 40
 
-    def test_the_cut_never_drops_a_breaking_while_keeping_a_safe(self):
-        # O `breaking` é o último item da lista: na ordem do arquivo ele seria
-        # o primeiro a cair.
-        result = self._result(["safe"] * 40 + ["breaking"])
+    def test_the_benign_lines_are_the_ones_that_get_cut(self):
+        result = self._result(["safe"] * 40 + ["breaking"] * 2)
         text = build_slack_text(result, "http://pr", "T", "1", "a")
         assert "migration_040.py" in text
+        assert "migration_041.py" in text
+        assert text.count("• ") < 42
+        assert "e mais" in text
+
+    def test_a_short_list_is_not_cut_and_says_nothing_about_it(self):
+        result = self._result(["safe"] * 3)
+        text = build_slack_text(result, "http://pr", "T", "1", "a")
+        assert text.count("• ") == 3
+        assert "e mais" not in text
+
+    def test_the_overflow_line_points_at_the_pr_and_not_the_job_log(self):
+        """`analysis_json` mora no log do job. Quem recebe este alerta recebe
+        Slack, não tem o repositório aberto e não vai abrir a aba Actions."""
+        result = self._result(["safe"] * 60)
+        text = build_slack_text(result, "http://pr", "T", "1", "a")
+        assert "e mais" in text
+        assert "analysis_json" not in text
+        assert "PR" in text
 
     def test_the_hardest_severity_comes_first(self):
         result = self._result(["safe", "breaking", "controlled"])
@@ -395,10 +419,54 @@ class TestTheSlackTextHasABudget:
         assert "migration_002.py" in bullets[1]
         assert "migration_000.py" in bullets[2]
 
-    def test_the_description_stays_within_the_budget(self):
-        result = self._result(["breaking"] * 200)
+    def test_even_the_blocking_lines_yield_to_the_attachment_ceiling(self):
+        """O teto do attachment do Slack é do Slack, não nosso. Passar dele não
+        entrega mais informação: entrega menos, porque a mensagem é recusada ou
+        truncada do lado de lá."""
+        result = self._result(["breaking"] * 400)
         text = build_slack_text(result, "http://pr", "T", "1", "a")
-        assert len(text) < 3000
+        assert len(text) <= 7000
+        assert "e mais" in text
+
+
+class TestTheSlackTextSaysItsShapeUpFront:
+    """O Slack colapsa o texto do attachment por volta de 700 caracteres.
+
+    Medido nas mensagens reais dos cinco PRs de `iclinic/testes-gpi`: das 12
+    linhas do PR #73, três apareciam sem clicar em "Mostrar mais". O conteúdo
+    não se perde, mas quem só passa o olho vê um quarto do PR. Uma linha de
+    resumo logo abaixo do cabeçalho cabe sempre nesse trecho.
+    """
+
+    @staticmethod
+    def _result(severities):
+        return TestTheSlackTextHasABudget._result(severities)
+
+    def test_the_summary_survives_the_collapse(self):
+        result = self._result(["breaking"] * 12 + ["safe"] * 2)
+        text = build_slack_text(result, "http://pr", "T", "1", "a")
+        assert "12 breaking" in text[:700]
+        assert "2 safe" in text[:700]
+
+    def test_the_summary_counts_operations_and_files(self):
+        result = self._result(["breaking"] * 3)
+        text = build_slack_text(result, "http://pr", "T", "1", "a")
+        assert "3 operação(ões)" in text
+        assert "3 arquivo(s)" in text
+
+    def test_the_summary_lists_the_hardest_severity_first(self):
+        result = self._result(["safe", "breaking", "controlled"])
+        text = build_slack_text(result, "http://pr", "T", "1", "a")
+        summary = next(line for line in text.splitlines() if "operação(ões)" in line)
+        assert summary.index("breaking") < summary.index("controlled") < summary.index("safe")
+
+    def test_a_message_without_reported_items_has_no_summary(self):
+        result = {
+            "highest_severity": "none",
+            "items": [{"file": "a.sql", "severity": "none", "reason": "Controle de transação."}],
+        }
+        text = build_slack_text(result, "http://pr", "T", "1", "a")
+        assert "operação(ões)" not in text
 
 
 class TestTheGlobMissIsNotSilence:
