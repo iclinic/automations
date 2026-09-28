@@ -378,6 +378,56 @@ class TestNothingIsSilentlyDropped:
         findings = classify_file(write(tmp_path, "0002_odd.sql", "FROBNICATE orders(qty);"))
         assert [f.severity for f in findings] == [Severity.UNKNOWN]
 
+    # -- o DDL depois de uma aspa escapada --------------------------------
+    #
+    # As três stacks afunilam em `sql.py`. Quando `\'` era lido como fim de
+    # literal, a aspa seguinte abria um literal que ia até o fim do arquivo, e
+    # o `DROP TABLE` desaparecia dentro dele: `has_db_change=false` e ⚪.
+
+    ESCAPED_QUOTE = {
+        "sql": (
+            "0001_comment.sql",
+            r"COMMENT ON COLUMN subject.cpf IS 'paciente\'s id'; DROP TABLE subject;",
+        ),
+        "django": (
+            "0002_runsql.py",
+            "from django.db import migrations\n"
+            "class Migration(migrations.Migration):\n"
+            "    dependencies = []\n"
+            "    operations = [\n"
+            "        migrations.RunSQL(\n"
+            r"""            "COMMENT ON COLUMN subject.cpf IS 'paciente\\'s id'; DROP TABLE subject;","""
+            "\n"
+            "        ),\n"
+            "    ]\n",
+        ),
+        "alembic": (
+            "0003_execute.py",
+            "from alembic import op\n"
+            "revision = 'abc123'\n"
+            "down_revision = 'def456'\n"
+            "def upgrade():\n"
+            r"""    op.execute("COMMENT ON COLUMN subject.cpf IS 'paciente\\'s id'; DROP TABLE subject;")"""
+            "\n",
+        ),
+        "typeorm": (
+            "1700000000000-Comment.ts",
+            "export class Comment1700000000000 implements MigrationInterface {\n"
+            "  public async up(queryRunner: QueryRunner): Promise<void> {\n"
+            r"    await queryRunner.query(`COMMENT ON COLUMN subject.cpf IS 'paciente\\'s id'; DROP TABLE subject;`);"
+            "\n  }\n}\n",
+        ),
+    }
+
+    @pytest.mark.parametrize("stack", sorted(ESCAPED_QUOTE))
+    def test_the_drop_after_an_escaped_quote_is_breaking(self, tmp_path, stack):
+        from classify import analyze
+
+        name, source = self.ESCAPED_QUOTE[stack]
+        result = analyze([str(write(tmp_path, name, source))])
+        assert result["highest_severity"] == "breaking", stack
+        assert result["has_db_change"] is True, stack
+
     def test_the_silent_parser_gate_still_holds_where_there_is_a_marker(self, tmp_path):
         # A dispensa é só para `.sql`. Um `.py` cujo parser volta vazio sobre
         # arquivo que declara operações continua sendo `unknown`.

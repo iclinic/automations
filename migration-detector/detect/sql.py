@@ -17,7 +17,7 @@ import re
 from dataclasses import dataclass, replace
 from typing import Callable
 
-from .severity import DUPLICATE, Finding, Severity, ref, worst
+from .severity import DUPLICATE, MANUAL, Finding, Severity, ref, worst
 
 __all__ = ["classify_sql", "classify_statement", "looks_like_ddl", "split_statements"]
 
@@ -29,12 +29,15 @@ _QUOTES = "'\"`"
 _MASK_CHAR = "~"
 
 
-def _spans(sql: str) -> list[tuple[str, int, int]]:
-    """Trechos que o classificador não pode ler como SQL.
+def _scan(sql: str) -> tuple[list[tuple[str, int, int]], bool]:
+    """Os trechos de `_spans`, e se o último deles chegou ao fim sem fechar.
 
-    Devolve `(tipo, inicio, fim)` para cada literal, identificador citado e
-    comentário. Aspas dobradas (`''`, `""`) escapam a si mesmas, como manda o
-    padrão; barra invertida não escapa nada.
+    Aspas dobradas (`''`, `""`) escapam a si mesmas, como manda o padrão. Dentro
+    de `'...'` a barra invertida também escapa, porque o MySQL do consumidor
+    Django lê assim: `'paciente\\'s id'` é um literal só. No PostgreSQL a mesma
+    barra não escapa, e `'C:\\'` fecha na segunda aspa — aqui ele fica aberto,
+    e literal aberto vira `unknown`. O desacordo de dialeto termina num pedido
+    de revisão, nunca num statement engolido.
     """
     spans: list[tuple[str, int, int]] = []
     i, n = 0, len(sql)
@@ -43,15 +46,20 @@ def _spans(sql: str) -> list[tuple[str, int, int]]:
         if char in _QUOTES:
             j = i + 1
             while j < n:
+                if char == "'" and sql[j] == "\\":
+                    j += 2
+                    continue
                 if sql[j] == char:
                     if j + 1 < n and sql[j + 1] == char:
                         j += 2
                         continue
                     break
                 j += 1
-            end = min(j + 1, n)
-            spans.append(("quoted", i, end))
-            i = end
+            if j >= n:
+                spans.append(("quoted", i, n))
+                return spans, True
+            spans.append(("quoted", i, j + 1))
+            i = j + 1
         elif sql.startswith("--", i):
             newline = sql.find("\n", i)
             end = n if newline == -1 else newline
@@ -59,12 +67,23 @@ def _spans(sql: str) -> list[tuple[str, int, int]]:
             i = end
         elif sql.startswith("/*", i):
             close = sql.find("*/", i + 2)
-            end = n if close == -1 else close + 2
-            spans.append(("comment", i, end))
-            i = end
+            if close == -1:
+                spans.append(("comment", i, n))
+                return spans, True
+            spans.append(("comment", i, close + 2))
+            i = close + 2
         else:
             i += 1
-    return spans
+    return spans, False
+
+
+def _spans(sql: str) -> list[tuple[str, int, int]]:
+    """Trechos que o classificador não pode ler como SQL.
+
+    Devolve `(tipo, inicio, fim)` para cada literal, identificador citado e
+    comentário. As regras de escape estão em `_scan`.
+    """
+    return _scan(sql)[0]
 
 
 def _blank_out(sql: str, spans: list[tuple[str, int, int]], filler: str) -> str:
@@ -646,6 +665,24 @@ def classify_statement(sql: str) -> Finding:
     )
 
 
+_UNCLOSED = Finding(
+    Severity.UNKNOWN,
+    "?",
+    "Literal, identificador citado ou comentário aberto que não fecha até o fim "
+    "do SQL — o que vem depois da abertura não foi lido como statement, "
+    + MANUAL,
+)
+
+
 def classify_sql(sql: str) -> list[Finding]:
-    """Classifica cada statement de um texto SQL, na ordem em que aparecem."""
-    return [classify_statement(statement) for statement in split_statements(sql)]
+    """Classifica cada statement de um texto SQL, na ordem em que aparecem.
+
+    Um literal ou comentário que não fecha engole o resto do texto, e o que
+    estava lá dentro some da saída sem deixar rastro — um `DROP TABLE` depois
+    dele sairia `none`. O `unknown` no fim é o rastro. A razão não repete nada
+    de dentro do trecho aberto, que pode ser dado de paciente.
+    """
+    findings = [classify_statement(statement) for statement in split_statements(sql)]
+    if _scan(sql)[1]:
+        findings.append(_UNCLOSED)
+    return findings

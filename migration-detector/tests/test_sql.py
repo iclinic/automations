@@ -10,7 +10,7 @@ import string
 
 import pytest
 
-from detect.severity import Severity
+from detect.severity import MANUAL, Severity
 from detect.sql import (
     _ALTER_COLUMN_RULES,
     _ALTER_TABLE_ACTIONS,
@@ -104,6 +104,67 @@ class TestSplitStatements:
     def test_empty_input_yields_nothing(self):
         assert split_statements("") == []
         assert split_statements("   \n  ") == []
+
+    def test_backslash_escapes_a_quote_inside_a_literal(self):
+        # MySQL, o banco do consumidor Django, lê `\'` como aspa dentro do
+        # literal. Lida como fim de literal, a aspa seguinte abria outro que
+        # corria até o fim do texto e levava o `DROP TABLE` junto.
+        sql = r"COMMENT ON COLUMN subject.cpf IS 'paciente\'s id'; DROP TABLE subject;"
+        assert split_statements(sql) == [
+            r"COMMENT ON COLUMN subject.cpf IS 'paciente\'s id'",
+            "DROP TABLE subject",
+        ]
+
+    def test_an_escaped_backslash_does_not_escape_the_closing_quote(self):
+        sql = r"SET @x = 'C:\\'; DROP TABLE orders"
+        assert split_statements(sql) == [r"SET @x = 'C:\\'", "DROP TABLE orders"]
+
+
+# ---------------------------------------------------------------------------
+# Texto que termina dentro de um literal ou comentário
+# ---------------------------------------------------------------------------
+
+
+class TestTextThatEndsInsideALiteral:
+    # Um literal que não fecha engole o resto da entrada: o que vem depois da
+    # aspa some da saída, e o arquivo sai com a severidade do que veio antes.
+    # Qualquer desacordo de dialeto sobre onde um literal termina acaba aqui,
+    # então a guarda não depende de dialeto.
+
+    @pytest.mark.parametrize(
+        "sql",
+        (
+            "COMMENT ON COLUMN subject.cpf IS 'paciente; DROP TABLE subject;",
+            'CREATE INDEX "ix_a; DROP TABLE subject;',
+            "CREATE INDEX `ix_a; DROP TABLE subject;",
+            "COMMENT ON TABLE subject IS 'x'; /* DROP TABLE subject;",
+        ),
+        ids=("literal", "double_quoted_identifier", "backquoted_identifier", "block_comment"),
+    )
+    def test_is_unknown(self, sql):
+        findings = classify_sql(sql)
+        assert findings[-1].severity is Severity.UNKNOWN
+        assert findings[-1].reason.endswith(MANUAL)
+
+    def test_keeps_the_statements_before_the_opening(self):
+        findings = classify_sql("DROP TABLE a; COMMENT ON TABLE b IS 'x")
+        assert [f.severity for f in findings] == [
+            Severity.BREAKING,
+            Severity.NONE,
+            Severity.UNKNOWN,
+        ]
+
+    def test_the_reason_carries_nothing_from_inside_the_literal(self):
+        # O literal aberto é justamente o texto que pode ser dado de paciente.
+        finding = classify_sql("COMMENT ON TABLE b IS '12345678900 Maria")[-1]
+        assert finding.severity is Severity.UNKNOWN
+        assert "Maria" not in finding.reason
+        assert "12345678900" not in finding.reason
+
+    def test_an_unclosed_line_comment_is_just_a_comment(self):
+        # `--` fecha no fim da linha ou no fim do texto; nos dois casos o
+        # banco lê o mesmo que o classificador.
+        assert [f.severity for f in classify_sql("DROP TABLE a; -- fim")] == [Severity.BREAKING]
 
 
 # ---------------------------------------------------------------------------
