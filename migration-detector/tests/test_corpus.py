@@ -773,13 +773,19 @@ class TestTheRealCorpus:
         )
 
     def test_the_typeorm_statements_did_not_lose_coverage(self):
-        """O segundo número do repositório de vídeo: statements, não arquivos."""
+        """O segundo número do repositório de vídeo: statements, não arquivos.
+
+        O total é piso pelo mesmo motivo da contagem de arquivos: o repositório
+        cresce. A migração que entrou em 17/08 trouxe dois `ADD COLUMN` e deixou
+        o `==` vermelho sem mudar nenhuma classificação. Quem guarda a qualidade
+        é o `<=` do `unknown` logo abaixo.
+        """
         files = _real_files("typeorm")
         if not files:
             pytest.skip(_why_it_skipped("typeorm"))
         findings = [f for p in files for f in detect.classify_file(p)]
         unknown = [f for f in findings if f.severity is Severity.UNKNOWN]
-        assert len(findings) == REAL_TYPEORM_STATEMENTS["total"]
+        assert len(findings) >= REAL_TYPEORM_STATEMENTS["total"]
         assert len(unknown) <= REAL_TYPEORM_STATEMENTS["unknown"]
         assert {f.operation for f in unknown} == {"ALTER TYPE"}
 
