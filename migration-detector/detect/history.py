@@ -665,6 +665,7 @@ class AppState:
     def _create_model(self, operation, call: ast.Call) -> None:
         name = text(_argument(operation, call, "name"))
         if name is None:
+            self.distrust()
             return
         state = _Model(unique_together=_options_unique_together(
             _argument(operation, call, "options")
@@ -678,6 +679,10 @@ class AppState:
             columns = elements(entry)
             if not columns or len(columns) != 2:
                 continue
+            # Coluna sem nome literal fica fora do estado, e não desliga o app:
+            # o modelo acabou de nascer, então não há definição antiga dela para
+            # sobrar — um `AlterField` sobre ela depois não acha estado e sai
+            # `unknown`. É o `return` dos outros handlers que deixa uma antiga.
             column = text(columns[0])
             if column is not None:
                 state.fields[column] = _field_state(columns[1])
@@ -686,6 +691,7 @@ class AppState:
         model = text(_argument(operation, call, "model_name"))
         name = text(_argument(operation, call, "name"))
         if model is None or name is None:
+            self.distrust()
             return
         self._model(model).fields[name] = _field_state(
             _argument(operation, call, "field")
@@ -695,6 +701,7 @@ class AppState:
         model = text(_argument(operation, call, "model_name"))
         name = text(_argument(operation, call, "name"))
         if model is None or name is None:
+            self.distrust()
             return
         self._model(model).fields.pop(name, None)
 
@@ -703,6 +710,7 @@ class AppState:
         old = text(_argument(operation, call, "old_name"))
         new = text(_argument(operation, call, "new_name"))
         if model is None or old is None or new is None:
+            self.distrust()
             return
         fields = self._model(model).fields
         if old in fields:
@@ -712,6 +720,7 @@ class AppState:
         old = text(_argument(operation, call, "old_name"))
         new = text(_argument(operation, call, "new_name"))
         if old is None or new is None:
+            self.distrust()
             return
         state = self._models.pop(old.lower(), None)
         if state is not None:
@@ -723,6 +732,7 @@ class AppState:
     def _delete_model(self, operation, call: ast.Call) -> None:
         name = text(_argument(operation, call, "name"))
         if name is None:
+            self.distrust()
             return
         self._models.pop(name.lower(), None)
         self._created_here.discard(name.lower())
@@ -730,6 +740,7 @@ class AppState:
     def _alter_unique_together(self, operation, call: ast.Call) -> None:
         name = text(_argument(operation, call, "name"))
         if name is None:
+            self.distrust()
             return
         self._model(name).unique_together = _pairs(
             _argument(operation, call, "unique_together")

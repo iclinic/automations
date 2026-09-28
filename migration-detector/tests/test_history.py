@@ -641,6 +641,48 @@ class TestAnAncestorThatCannotBeReadEntirely:
     def test_an_ancestor_that_is_not_valid_python(self, tmp_path):
         self.unknown(tmp_path, "class Migration(migrations.Migration:\n")
 
+    # Ancestral legível, operação legível, nome que não é literal. O handler
+    # não sabe qual campo ou modelo a operação mexeu, e pular a operação deixa
+    # no estado a definição que ela pode ter substituído. `FIELD = "code"` é o
+    # caso normal: 0002 mergeia num PR, 0003 vem no seguinte, e só o 0003 é
+    # classificado.
+    NON_LITERAL_NAMES = {
+        "add_field_name": "migrations.AddField(model_name='subject', name=FIELD, "
+        "field=models.CharField(max_length=40)),",
+        "add_field_model": "migrations.AddField(model_name=MODEL, name='code', "
+        "field=models.CharField(max_length=40)),",
+        "alter_field_name": "migrations.AlterField(model_name='subject', name=FIELD, "
+        "field=models.CharField(max_length=40)),",
+        "remove_field_name": "migrations.RemoveField(model_name='subject', name=FIELD),",
+        "rename_field_old": "migrations.RenameField(model_name='subject', old_name=OLD, "
+        "new_name='code'),",
+        "rename_field_new": "migrations.RenameField(model_name='subject', old_name='code', "
+        "new_name=NEW),",
+        "rename_field_model": "migrations.RenameField(model_name=MODEL, old_name='code', "
+        "new_name='legacy_code'),",
+        "rename_model_old": "migrations.RenameModel(old_name=OLD, new_name='Subject'),",
+        "rename_model_new": "migrations.RenameModel(old_name='Subject', new_name=NEW),",
+        "delete_model_name": "migrations.DeleteModel(name=MODEL),",
+        "create_model_name": "migrations.CreateModel(name=MODEL, fields=[]),",
+        "alter_unique_together_name": "migrations.AlterUniqueTogether(name=MODEL, "
+        "unique_together={('code', 'id')}),",
+    }
+
+    @pytest.mark.parametrize("shape", sorted(NON_LITERAL_NAMES))
+    def test_an_ancestor_operation_whose_name_is_not_a_literal(self, tmp_path, shape):
+        self.unknown(
+            tmp_path, migration_source(self.NON_LITERAL_NAMES[shape], ["0001_initial"])
+        )
+
+    def test_the_names_cover_every_handler_that_reads_a_name(self):
+        # `SeparateDatabaseAndState` não lê nome e tem os próprios testes. Um
+        # handler novo sem caso aqui é um `return` que ninguém viu desistir.
+        called = {
+            call_name(ast.parse(source.rstrip(","), mode="eval").body)
+            for source in self.NON_LITERAL_NAMES.values()
+        }
+        assert called == set(_HANDLERS) - {"SeparateDatabaseAndState"}
+
 
 # ---------------------------------------------------------------------------
 # Sem estado anterior: unknown, nunca um palpite
