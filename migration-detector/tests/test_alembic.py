@@ -420,6 +420,39 @@ class TestReversibleOperationsAreControlled:
 # ---------------------------------------------------------------------------
 
 
+class TestAddUniqueColumn:
+    """A mesma regra do `AddField` único do Django.
+
+    Só `server_default` preenche as linhas que já existem; o `default` do
+    SQLAlchemy vale para insert novo e deixa as antigas em NULL.
+    """
+
+    @pytest.mark.parametrize(
+        "column",
+        (
+            'sa.Column("slug", sa.String(20), server_default="", nullable=False, unique=True)',
+            'sa.Column("slug", sa.String(20), server_default="x", nullable=True, unique=True)',
+            'sa.Column("slug", sa.String(20), nullable=False, unique=True)',
+        ),
+    )
+    def test_is_breaking(self, column):
+        finding = one(f'op.add_column("doc", {column})')
+        assert finding.severity is Severity.BREAKING
+        assert DUPLICATE in finding.reason
+
+    @pytest.mark.parametrize(
+        "column",
+        (
+            'sa.Column("slug", sa.String(20), nullable=True, unique=True)',
+            'sa.Column("slug", sa.String(20), default="x", nullable=True, unique=True)',
+            'sa.Column("slug", sa.String(20), server_default=None, nullable=True, unique=True)',
+            'sa.Column("slug", sa.String(20), server_default="", nullable=False, unique=False)',
+        ),
+    )
+    def test_without_a_repeated_value_keeps_the_add_column_rule(self, column):
+        assert severity_of(f'op.add_column("doc", {column})') is Severity.SAFE
+
+
 class TestAddColumn:
     def test_nullable_column_is_safe(self):
         assert (

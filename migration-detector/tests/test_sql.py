@@ -10,7 +10,7 @@ import string
 
 import pytest
 
-from detect.severity import MANUAL, Severity
+from detect.severity import DUPLICATE, MANUAL, Severity
 from detect.sql import (
     _ALTER_COLUMN_RULES,
     _ALTER_TABLE_ACTIONS,
@@ -277,6 +277,38 @@ class TestDestructiveVerbsAreBreaking:
 # ---------------------------------------------------------------------------
 # ADD COLUMN: a mesma regra do AddField do Django e do add_column do Alembic
 # ---------------------------------------------------------------------------
+
+
+class TestAddUniqueColumn:
+    """A mesma regra do `AddField` único do Django, no DDL escrito à mão."""
+
+    @pytest.mark.parametrize(
+        "sql",
+        (
+            "ALTER TABLE doc ADD COLUMN slug varchar(20) NOT NULL DEFAULT '' UNIQUE",
+            "ALTER TABLE doc ADD COLUMN slug varchar(20) DEFAULT 'x' UNIQUE",
+            'ALTER TABLE "doc" ADD "slug" varchar(20) NOT NULL UNIQUE',
+            "ALTER TABLE `doc` ADD COLUMN `slug` varchar(20) UNIQUE NOT NULL DEFAULT ''",
+        ),
+    )
+    def test_is_breaking(self, sql):
+        finding = classify_statement(sql)
+        assert finding.severity is Severity.BREAKING
+        assert DUPLICATE in finding.reason
+
+    @pytest.mark.parametrize(
+        "sql",
+        (
+            "ALTER TABLE doc ADD COLUMN slug varchar(20) UNIQUE",
+            "ALTER TABLE doc ADD COLUMN slug varchar(20) NULL UNIQUE",
+            "ALTER TABLE doc ADD COLUMN slug varchar(20) DEFAULT NULL UNIQUE",
+            # Nome de coluna com `unique` dentro não é a palavra-chave.
+            "ALTER TABLE `doc` ADD COLUMN `unique_ref` varchar(20) NOT NULL DEFAULT ''",
+            "ALTER TABLE doc ADD COLUMN slug varchar(20) NOT NULL DEFAULT 'UNIQUE'",
+        ),
+    )
+    def test_without_a_repeated_value_keeps_the_add_column_rule(self, sql):
+        assert severity_of(sql) is Severity.SAFE
 
 
 class TestAddColumn:

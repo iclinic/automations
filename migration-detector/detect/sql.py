@@ -406,7 +406,20 @@ def _refine_add_column(clause: str) -> _Rule | None:
     # `add_column`: sem `NULL` e sem `DEFAULT`, a coluna não entra numa tabela
     # que já tem linha. O DDL escrito à mão tem que classificar igual ao
     # equivalente em ORM, senão a mesma mudança sai com duas cores.
-    if re.search(r"\bNOT\s+NULL\b", clause, re.I) and not re.search(r"\bDEFAULT\b", clause, re.I):
+    #
+    # Coluna UNIQUE que chega com o mesmo valor em toda linha existente é a
+    # outra metade da regra do `AddField`: DEFAULT que não seja NULL, ou NOT
+    # NULL sem nada, repete o valor e o índice único colide.
+    not_null = re.search(r"\bNOT\s+NULL\b", clause, re.I)
+    fills_a_value = re.search(r"\bDEFAULT\s+(?!NULL\b)", clause, re.I)
+    if re.search(r"\bUNIQUE\b", clause, re.I) and (not_null or fills_a_value):
+        return _Rule(
+            Severity.BREAKING,
+            "Coluna única {column} adicionada em {table} com o mesmo valor em toda "
+            "linha existente — " + DUPLICATE,
+            operation="ADD COLUMN",
+        )
+    if not_null and not re.search(r"\bDEFAULT\b", clause, re.I):
         return _Rule(
             Severity.CONTROLLED,
             "Coluna {column} adicionada em {table} como NOT NULL sem DEFAULT — "

@@ -65,6 +65,11 @@ def _is_true(node: ast.expr | None) -> bool:
     return isinstance(node, ast.Constant) and node.value is True
 
 
+def _is_none(node: ast.expr | None) -> bool:
+    """O nó é o literal `None`?"""
+    return isinstance(node, ast.Constant) and node.value is None
+
+
 # ---------------------------------------------------------------------------
 # A tabela de regras
 # ---------------------------------------------------------------------------
@@ -294,6 +299,22 @@ def _refine_add_field(
         keyword.arg == "null" and _is_true(keyword.value) for keyword in field.keywords
     )
     has_default = any(keyword.arg == "default" for keyword in field.keywords)
+    fills_a_value = any(
+        keyword.arg == "default" and not _is_none(keyword.value) for keyword in field.keywords
+    )
+    unique = any(
+        keyword.arg == "unique" and _is_true(keyword.value) for keyword in field.keywords
+    )
+    if unique and (fills_a_value or not nullable):
+        # O default é avaliado uma vez e gravado em toda linha existente,
+        # callable incluído. NULL não colide no índice único; qualquer outro
+        # valor repetido colide, e a migração para na segunda linha.
+        return replace(
+            operation,
+            severity=Severity.BREAKING,
+            reason="Campo único {target} adicionado em {model} com o mesmo valor "
+            "em toda linha existente — " + DUPLICATE,
+        )
     if nullable or has_default:
         return None
     return replace(

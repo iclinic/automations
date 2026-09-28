@@ -65,6 +65,11 @@ def _is_true(node: ast.expr | None) -> bool:
     return isinstance(node, ast.Constant) and node.value is True
 
 
+def _is_none(node: ast.expr | None) -> bool:
+    """O nó é o literal `None`?"""
+    return isinstance(node, ast.Constant) and node.value is None
+
+
 def _is_false(node: ast.expr | None) -> bool:
     """O nó é o literal `False`? `0` e uma lista vazia não são."""
     return isinstance(node, ast.Constant) and node.value is False
@@ -440,6 +445,23 @@ def _refine_add_column(operation: _Operation, call: ast.Call) -> _Operation | No
         keyword.arg == "nullable" and _is_true(keyword.value) for keyword in column.keywords
     )
     has_default = any(keyword.arg == "server_default" for keyword in column.keywords)
+    fills_a_value = any(
+        keyword.arg == "server_default" and not _is_none(keyword.value)
+        for keyword in column.keywords
+    )
+    unique = any(
+        keyword.arg == "unique" and _is_true(keyword.value) for keyword in column.keywords
+    )
+    if unique and (fills_a_value or not nullable):
+        # Mesma regra do `AddField` único do Django. Só `server_default`
+        # preenche as linhas existentes; o `default` do SQLAlchemy vale para
+        # insert novo e deixa as antigas em NULL, que não colide.
+        return replace(
+            operation,
+            severity=Severity.BREAKING,
+            reason="Coluna única {target} adicionada em {table} com o mesmo valor "
+            "em toda linha existente — " + DUPLICATE,
+        )
     if nullable or has_default:
         return None
     return replace(

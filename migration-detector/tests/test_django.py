@@ -331,6 +331,51 @@ class TestDestructiveOperationsAreBreaking:
 # ---------------------------------------------------------------------------
 
 
+class TestAddUniqueField:
+    """Coluna única que chega com o mesmo valor em toda linha existente.
+
+    O default é avaliado uma vez e gravado em todas as linhas, inclusive o
+    callable. Com duas linhas ou mais, o índice único falha em chave duplicada.
+    O consumidor Django já tem migração nessa forma: `SlugField` com `default`
+    e `unique=True`, e `preserve_default=False` ao lado.
+    """
+
+    @pytest.mark.parametrize(
+        "field",
+        (
+            "models.SlugField(default='slug-padrao', unique=True)",
+            "models.CharField(max_length=20, default='', unique=True)",
+            "models.CharField(max_length=20, null=True, default='x', unique=True)",
+            "models.UUIDField(default=uuid.uuid4, unique=True)",
+            "models.CharField(max_length=20, unique=True)",
+        ),
+    )
+    def test_is_breaking(self, field):
+        finding = only(
+            migration(
+                f"migrations.AddField(model_name='doc', name='slug', field={field}),"
+            )
+        )
+        assert finding.severity is Severity.BREAKING
+        assert DUPLICATE in finding.reason
+
+    @pytest.mark.parametrize(
+        "field",
+        (
+            # NULL não conta como duplicado no índice único, no MySQL e no
+            # PostgreSQL.
+            "models.CharField(max_length=20, null=True, unique=True)",
+            "models.CharField(max_length=20, null=True, default=None, unique=True)",
+            "models.CharField(max_length=20, default='', unique=False)",
+        ),
+    )
+    def test_without_a_repeated_value_keeps_the_add_field_rule(self, field):
+        assert (
+            severity_of(f"migrations.AddField(model_name='doc', name='slug', field={field}),")
+            is Severity.SAFE
+        )
+
+
 class TestAddField:
     """Aceite: `null=True` ou `default` é safe; sem os dois, controlled."""
 
