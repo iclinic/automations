@@ -28,6 +28,11 @@
       "operation": "op.create_primary_key",
       "reason": "Chave primária `pk_docs_signature` criada em `docs_signature` — linha duplicada já existente impede a migração e gravação duplicada passa a falhar.",
       "severity": "breaking"
+    },
+    {
+      "operation": "op.create_foreign_key",
+      "reason": "Chave estrangeira `fk_docs_signature_owner` criada em `docs_signature`.",
+      "severity": "controlled"
     }
   ],
   "alembic/versions/0004_alter_and_rename.py": [
@@ -451,6 +456,11 @@
   ],
   "sql/0002_alter_table_postgres.sql": [
     {
+      "operation": "ADD CONSTRAINT ... PRIMARY KEY",
+      "reason": "Chave primária adicionada em `ledger_entry` — linha duplicada já existente impede a migração e gravação duplicada passa a falhar.",
+      "severity": "breaking"
+    },
+    {
       "operation": "ADD CONSTRAINT",
       "reason": "Constraint adicionada em `ledger_entry`.",
       "severity": "controlled"
@@ -519,6 +529,11 @@
   "sql/0003_alter_table_mysql.sql": [
     {
       "operation": "ADD PRIMARY KEY",
+      "reason": "Chave primária adicionada em `ledger_entry_v2` — linha duplicada já existente impede a migração e gravação duplicada passa a falhar.",
+      "severity": "breaking"
+    },
+    {
+      "operation": "ADD FOREIGN KEY",
       "reason": "Constraint adicionada em `ledger_entry_v2`.",
       "severity": "controlled"
     },
@@ -554,6 +569,11 @@
     }
   ],
   "sql/0004_drop_objects.sql": [
+    {
+      "operation": "TRUNCATE",
+      "reason": "Todas as linhas da tabela `ledger_entry_v2` apagadas — quem lê essa tabela perde os dados.",
+      "severity": "breaking"
+    },
     {
       "operation": "DROP INDEX",
       "reason": "Índice `ledger_entry_id_uidx` removido — consulta que dependia dele fica mais lenta.",

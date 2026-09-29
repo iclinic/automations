@@ -1,4 +1,5 @@
 ALTER TABLE ledger_entry ADD CONSTRAINT ledger_entry_pk PRIMARY KEY (id);
+ALTER TABLE ledger_entry ADD CONSTRAINT ledger_entry_label_ck CHECK (label <> '');
 ALTER TABLE ledger_entry ADD CONSTRAINT ledger_entry_label_uq UNIQUE (label);
 ALTER TABLE ledger_entry ADD COLUMN memo varchar(255) NULL;
 ALTER TABLE ledger_entry ADD COLUMN owner_id bigint NOT NULL;

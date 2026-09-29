@@ -348,6 +348,21 @@ class TestAddUniqueField:
             "models.CharField(max_length=20, null=True, default='x', unique=True)",
             "models.UUIDField(default=uuid.uuid4, unique=True)",
             "models.CharField(max_length=20, unique=True)",
+            # `OneToOneField` é único sem declarar nada: o `__init__` dele põe
+            # `unique=True`. É o que o `makemigrations` escreve quando alguém
+            # adiciona um one-to-one obrigatório num modelo que já existe.
+            "models.OneToOneField(default=1, on_delete=django.db.models.deletion.CASCADE, "
+            "to='auth.user')",
+            "models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, to='auth.user')",
+            # Subclasse de terceiro: `annoying.fields.AutoOneToOneField`.
+            "annoying.fields.AutoOneToOneField(default=1, on_delete=models.CASCADE, "
+            "to='auth.user')",
+            # Chave primária é única e NOT NULL.
+            "models.IntegerField(default=1, primary_key=True)",
+            # `auto_now_add` e `db_default` preenchem as linhas existentes com um
+            # valor só, como o `default`.
+            "models.DateTimeField(auto_now_add=True, unique=True)",
+            "models.IntegerField(db_default=0, unique=True)",
         ),
     )
     def test_is_breaking(self, field):
@@ -367,12 +382,48 @@ class TestAddUniqueField:
             "models.CharField(max_length=20, null=True, unique=True)",
             "models.CharField(max_length=20, null=True, default=None, unique=True)",
             "models.CharField(max_length=20, default='', unique=False)",
+            "models.OneToOneField(null=True, on_delete=django.db.models.deletion.CASCADE, "
+            "to='auth.user')",
         ),
     )
     def test_without_a_repeated_value_keeps_the_add_field_rule(self, field):
         assert (
             severity_of(f"migrations.AddField(model_name='doc', name='slug', field={field}),")
             is Severity.SAFE
+        )
+
+    def test_an_auto_field_primary_key_numbers_the_existing_rows(self):
+        # O banco gera um valor por linha: não há valor repetido.
+        assert (
+            severity_of(
+                "migrations.AddField(model_name='doc', name='id',"
+                " field=models.BigAutoField(primary_key=True, serialize=False)),"
+            )
+            is Severity.SAFE
+        )
+
+    def test_a_one_to_one_imported_under_an_alias_is_unique(self):
+        finding = only(
+            migration(
+                "migrations.AddField(model_name='doc', name='owner',"
+                " field=O2O(default=1, on_delete=models.CASCADE, to='auth.user')),",
+                preamble="from django.db.models import OneToOneField as O2O",
+            )
+        )
+        assert finding.severity is Severity.BREAKING
+        assert DUPLICATE in finding.reason
+
+    @pytest.mark.parametrize(
+        "field",
+        (
+            "models.CharField(max_length=20, default='x', unique=UNIQUE)",
+            "models.IntegerField(default=1, primary_key=IS_PK)",
+        ),
+    )
+    def test_uniqueness_that_is_not_a_literal_is_unknown(self, field):
+        assert (
+            severity_of(f"migrations.AddField(model_name='doc', name='slug', field={field}),")
+            is Severity.UNKNOWN
         )
 
 
@@ -422,6 +473,53 @@ class TestAddField:
                 " field=models.CharField(max_length=10, null=False)),"
             )
             is Severity.CONTROLLED
+        )
+
+    def test_many_to_many_creates_a_join_table_and_is_safe(self):
+        # A M2M não põe coluna na tabela do modelo; `null` e `default` não se
+        # aplicam a ela.
+        finding = only(
+            migration(
+                "migrations.AddField(model_name='subject', name='rotulos',"
+                " field=models.ManyToManyField(to='rotulos.Rotulo')),"
+            )
+        )
+        assert finding.severity is Severity.SAFE
+        assert "NOT NULL" not in finding.reason
+
+    @pytest.mark.parametrize(
+        "field",
+        (
+            "models.DateTimeField(auto_now_add=True)",
+            "models.DateTimeField(auto_now=True)",
+            "models.DateField(auto_now_add=True)",
+        ),
+    )
+    def test_auto_now_fills_the_existing_rows_and_is_safe(self, field):
+        # O schema editor do Django grava a data corrente nas linhas que já
+        # existem, então a coluna NOT NULL entra sem `default`.
+        assert (
+            severity_of(f"migrations.AddField(model_name='subject', name='at', field={field}),")
+            is Severity.SAFE
+        )
+
+    def test_db_default_fills_the_existing_rows_and_is_safe(self):
+        assert (
+            severity_of(
+                "migrations.AddField(model_name='subject', name='score',"
+                " field=models.IntegerField(db_default=0)),"
+            )
+            is Severity.SAFE
+        )
+
+    def test_unpacked_field_arguments_are_unknown(self):
+        # `null`, `default` e `unique` podem estar dentro do dicionário.
+        assert (
+            severity_of(
+                "migrations.AddField(model_name='subject', name='code',"
+                " field=models.CharField(**{'max_length': 5, 'default': 'x', 'unique': True})),"
+            )
+            is Severity.UNKNOWN
         )
 
     def test_blank_true_does_not_count_as_nullable(self):

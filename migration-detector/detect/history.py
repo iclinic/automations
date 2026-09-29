@@ -295,6 +295,18 @@ _COMPARISONS: tuple[_Comparison, ...] = (
         },
     ),
     _Comparison(
+        # Antes de "classe do campo mudou", que também casaria: a coluna do
+        # `OneToOneField` é a mesma do `ForeignKey`, e o que muda é o índice
+        # único que o `__init__` dele declara.
+        "ForeignKey passou a OneToOneField",
+        Severity.BREAKING,
+        "Campo {target} de {model} passou de {before} para {after} — a coluna "
+        "ganha índice único, " + DUPLICATE,
+        lambda before, after: before.cls == "ForeignKey"
+        and after.cls.endswith("OneToOneField"),
+        lambda before, after: {"before": ref(before.cls), "after": ref(after.cls)},
+    ),
+    _Comparison(
         "classe do campo mudou",
         Severity.BREAKING,
         "Campo {target} de {model} mudou de {before} para {after} — "

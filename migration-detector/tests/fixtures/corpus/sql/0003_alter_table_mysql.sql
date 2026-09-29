@@ -1,4 +1,5 @@
 ALTER TABLE ledger_entry_v2 ADD PRIMARY KEY (id);
+ALTER TABLE ledger_entry_v2 ADD FOREIGN KEY (owner_id) REFERENCES ledger_entry (id);
 ALTER TABLE ledger_entry_v2 ADD INDEX ledger_entry_title_idx (title);
 ALTER TABLE ledger_entry_v2 ADD UNIQUE INDEX ledger_entry_title_uidx (title);
 ALTER TABLE ledger_entry_v2 DROP KEY ledger_entry_title_idx;

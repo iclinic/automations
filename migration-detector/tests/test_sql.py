@@ -442,12 +442,23 @@ class TestAddConstraint:
             is Severity.CONTROLLED
         )
 
-    def test_primary_key_constraint_is_controlled(self):
-        assert (
-            severity_of(
-                'ALTER TABLE "schedule" ADD CONSTRAINT "PK_920854" PRIMARY KEY ("meetingId")'
-            )
-            is Severity.CONTROLLED
+    @pytest.mark.parametrize(
+        "sql",
+        (
+            'ALTER TABLE "schedule" ADD CONSTRAINT "PK_920854" PRIMARY KEY ("meetingId")',
+            "ALTER TABLE t ADD PRIMARY KEY (id)",
+        ),
+    )
+    def test_primary_key_is_breaking(self, sql):
+        # Chave primária é um índice único: linha duplicada impede a migração,
+        # a mesma frase do `create_primary_key` do Alembic.
+        finding = classify_statement(sql)
+        assert finding.severity is Severity.BREAKING
+        assert DUPLICATE in finding.reason
+
+    def test_foreign_key_without_constraint_name_is_controlled(self):
+        assert severity_of("ALTER TABLE t ADD FOREIGN KEY (o_id) REFERENCES o(id)") is (
+            Severity.CONTROLLED
         )
 
     def test_check_constraint_is_controlled(self):
@@ -577,7 +588,6 @@ class TestUnrecognizedVerbsReturnUnknown:
             "INSERT INTO `claim_version`(version) VALUES ('3.01.00')",
             "UPDATE bookings_booking SET status = 1 WHERE clinic_id = 2",
             "DELETE FROM bookings_booking WHERE id = 1",
-            "TRUNCATE TABLE bookings_booking",
             "CREATE MATERIALIZED VIEW mv AS SELECT 1",
             "GRANT SELECT ON schedule TO analytics",
             "CALL some_procedure()",
@@ -767,6 +777,21 @@ class TestVerbMappingMysql:
 
 
 class TestMultiActionAlterTable:
+    def test_classify_sql_reports_every_action(self):
+        # A mensagem do Slack lista uma linha por finding; a ação mais branda
+        # não pode sumir atrás da mais grave.
+        findings = classify_sql("ALTER TABLE t ADD COLUMN a INT, DROP COLUMN b")
+        assert [(f.operation, f.severity) for f in findings] == [
+            ("ADD COLUMN", Severity.SAFE),
+            ("DROP COLUMN", Severity.BREAKING),
+        ]
+
+    def test_noise_clauses_are_not_reported(self):
+        findings = classify_sql(
+            "ALTER TABLE `t` ALGORITHM=INPLACE, LOCK=NONE, ADD COLUMN `a` int NULL"
+        )
+        assert [f.operation for f in findings] == ["ADD COLUMN"]
+
     def test_takes_the_highest_severity_of_the_actions(self):
         # subjects/0053 — adiciona coluna (safe) e índice único (breaking)
         finding = classify_statement(
@@ -878,6 +903,7 @@ def placeholders(template):
 # impede refinador novo entrar sem a sua.
 ALTER_TABLE_REFINER_TRIGGERS = {
     "add_constraint": "ADD CONSTRAINT uq UNIQUE (a)",
+    "add_key": "ADD PRIMARY KEY (id)",
     "add_column": "ADD COLUMN c int NOT NULL",
     "modify": "MODIFY c int NOT NULL",
     "alter_column": "ALTER COLUMN c SET NOT NULL",
@@ -1221,3 +1247,25 @@ class TestLooksLikeDDL:
 
     def test_a_leading_comment_does_not_hide_the_verb(self):
         assert looks_like_ddl("-- ajusta a tabela\nALTER TABLE app_thing DROP COLUMN c") is True
+
+
+# ---------------------------------------------------------------------------
+# TRUNCATE
+# ---------------------------------------------------------------------------
+
+
+class TestTruncate:
+    @pytest.mark.parametrize(
+        "sql, table",
+        (
+            ("TRUNCATE TABLE bookings_booking", "bookings_booking"),
+            ("TRUNCATE bookings_booking", "bookings_booking"),
+            ('TRUNCATE TABLE "public"."orders"', "public.orders"),
+        ),
+    )
+    def test_is_breaking_and_names_the_table(self, sql, table):
+        # Apaga todas as linhas: quem lê a tabela perde os dados.
+        finding = classify_statement(sql)
+        assert finding.severity is Severity.BREAKING
+        assert finding.operation == "TRUNCATE"
+        assert f"`{table}`" in finding.reason

@@ -17,6 +17,9 @@ depends_on = None
 def upgrade() -> None:
     op.create_unique_constraint("uq_docs_signature_external_id", "docs_signature", ["external_id"])
     op.create_primary_key("pk_docs_signature", "docs_signature", ["id"])
+    op.create_foreign_key(
+        "fk_docs_signature_owner", "docs_signature", "docs_owner", ["owner_id"], ["id"]
+    )
 
 
 def downgrade() -> None:

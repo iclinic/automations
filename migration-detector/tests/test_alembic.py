@@ -275,9 +275,9 @@ class TestOpAlias:
         assert severity_of('OPS["drop"]("t")') is Severity.UNKNOWN
 
     def test_an_operation_out_of_the_table_is_unknown_and_names_itself(self):
-        finding = one('op.create_foreign_key("fk", "a", "b", ["a_id"], ["id"])')
+        finding = one('op.create_exclude_constraint("ex", "a", ("janela", "&&"))')
         assert finding.severity is Severity.UNKNOWN
-        assert "`op.create_foreign_key`" in finding.reason
+        assert "`op.create_exclude_constraint`" in finding.reason
 
 
 # ---------------------------------------------------------------------------
@@ -433,6 +433,9 @@ class TestAddUniqueColumn:
             'sa.Column("slug", sa.String(20), server_default="", nullable=False, unique=True)',
             'sa.Column("slug", sa.String(20), server_default="x", nullable=True, unique=True)',
             'sa.Column("slug", sa.String(20), nullable=False, unique=True)',
+            # Chave primária é única e NOT NULL.
+            'sa.Column("k", sa.Integer(), primary_key=True)',
+            'sa.Column("k", sa.Integer(), server_default="1", primary_key=True)',
         ),
     )
     def test_is_breaking(self, column):
@@ -451,6 +454,47 @@ class TestAddUniqueColumn:
     )
     def test_without_a_repeated_value_keeps_the_add_column_rule(self, column):
         assert severity_of(f'op.add_column("doc", {column})') is Severity.SAFE
+
+    def test_an_autoincrement_primary_key_numbers_the_existing_rows(self):
+        column = 'sa.Column("k", sa.Integer(), primary_key=True, autoincrement=True)'
+        assert severity_of(f'op.add_column("doc", {column})') is Severity.SAFE
+
+
+class TestForeignKey:
+    def test_create_foreign_key_is_controlled(self):
+        # Mesma severidade do `ADD FOREIGN KEY` do SQL: linha órfã impede a
+        # migração, mas quem lê a tabela não quebra.
+        finding = one('op.create_foreign_key("fk_doc_owner", "doc", "owner", ["owner_id"], ["id"])')
+        assert finding.severity is Severity.CONTROLLED
+        assert finding.reason == "Chave estrangeira `fk_doc_owner` criada em `doc`."
+
+
+class TestSchema:
+    """O `schema=` qualifica a tabela na frase, como o SQL escrito à mão faz."""
+
+    @pytest.mark.parametrize(
+        "upgrade, expected",
+        (
+            ('op.drop_table("users", schema="clinic")', "Tabela `clinic.users` removida"),
+            ('op.drop_column("ficha", "cpf", schema="clinic")', "de `clinic.ficha`"),
+            (
+                'op.add_column("ficha", sa.Column("x", sa.Integer(), nullable=True), "clinic")',
+                "em `clinic.ficha`",
+            ),
+            (
+                'op.create_foreign_key("fk", "doc", "owner", ["o_id"], ["id"], '
+                'source_schema="clinic")',
+                "em `clinic.doc`",
+            ),
+        ),
+    )
+    def test_the_schema_qualifies_the_table(self, upgrade, expected):
+        assert expected in one(upgrade).reason
+
+    def test_a_schema_that_is_not_a_literal_is_left_out(self):
+        assert one('op.drop_table("users", schema=SCHEMA)').reason.startswith(
+            "Tabela `users` removida"
+        )
 
 
 class TestAddColumn:
@@ -956,6 +1000,10 @@ TWO_NAMED_SENTENCES = {
         'op.drop_constraint("restricao_apelido", "paciente", type_="unique")',
         "Constraint `restricao_apelido` removida de `paciente`",
     ),
+    "create_foreign_key": (
+        'op.create_foreign_key("chave_dono", "paciente", "pessoa", ["dono_id"], ["id"])',
+        "Chave estrangeira `chave_dono` criada em `paciente`.",
+    ),
 }
 
 
@@ -1041,8 +1089,9 @@ EVERY_KIND_OF_MIGRATION = [
     migration('op.execute("")'),
     migration("op.execute(SQL)"),
     migration('op.f("ix")'),
-    # o que o classificador não lê
     migration('op.create_foreign_key("fk", "a", "b", ["a_id"], ["id"])'),
+    # o que o classificador não lê
+    migration('op.create_exclude_constraint("ex", "a", ("janela", "&&"))'),
     migration("with op.batch_alter_table('t') as batch_op:\n    batch_op.drop_column('c')"),
     migration("if LEGACY:\n    op.drop_table('t')"),
     migration("conn = op.get_bind()"),

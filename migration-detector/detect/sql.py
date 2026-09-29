@@ -391,6 +391,11 @@ _ALTER_TABLE_RULES: dict[str, _Rule] = {
 # cláusula mascarada e devolve a regra que substitui a da tabela, ou `None`
 # para manter a da tabela.
 
+# Chave primária é um índice único: linha duplicada impede a migração. É a
+# frase do `create_primary_key` do Alembic.
+_PRIMARY_KEY = _Rule(Severity.BREAKING, "Chave primária adicionada em {table} — " + DUPLICATE)
+
+
 def _refine_add_constraint(clause: str) -> _Rule | None:
     if re.search(r"\bUNIQUE\b", clause, re.I):
         return _Rule(
@@ -398,6 +403,14 @@ def _refine_add_constraint(clause: str) -> _Rule | None:
             "Constraint UNIQUE adicionada em {table} — " + DUPLICATE,
             "... UNIQUE",
         )
+    if re.search(r"\bPRIMARY\s+KEY\b", clause, re.I):
+        return replace(_PRIMARY_KEY, suffix="... PRIMARY KEY")
+    return None
+
+
+def _refine_add_key(clause: str) -> _Rule | None:
+    if re.match(r"\s*ADD\s+PRIMARY\s+KEY\b", clause, re.I):
+        return _PRIMARY_KEY
     return None
 
 
@@ -448,6 +461,7 @@ def _refine_alter_column(clause: str) -> _Rule | None:
 
 _ALTER_TABLE_REFINERS: dict[str, Callable[[str], _Rule | None]] = {
     "add_constraint": _refine_add_constraint,
+    "add_key": _refine_add_key,
     "add_column": _refine_add_column,
     "modify": _refine_modify,
     "alter_column": _refine_alter_column,
@@ -480,7 +494,7 @@ def _classify_alter_table_clause(
     return _finding(rule, operation, table=table, column=column)
 
 
-def _classify_alter_table(masked: str, raw: str) -> Finding:
+def _classify_alter_table(masked: str, raw: str) -> list[Finding]:
     table, actions_start = _ident_span_after(
         masked, raw, r"\bALTER\s+TABLE\b\s*(?:\bONLY\b\s*)?(?:\bIF\s+EXISTS\b\s*)?"
     )
@@ -503,13 +517,15 @@ def _classify_alter_table(masked: str, raw: str) -> Finding:
         )
 
     if not findings:
-        return Finding(
-            Severity.UNKNOWN,
-            "ALTER TABLE",
-            f"Nenhuma ação reconhecida no ALTER TABLE de {ref(table)} — "
-            "precisa de revisão manual.",
-        )
-    return worst(findings)
+        return [
+            Finding(
+                Severity.UNKNOWN,
+                "ALTER TABLE",
+                f"Nenhuma ação reconhecida no ALTER TABLE de {ref(table)} — "
+                "precisa de revisão manual.",
+            )
+        ]
+    return findings
 
 
 # --- verbos de statement ---------------------------------------------------
@@ -573,6 +589,14 @@ _STATEMENT_RULES: tuple[_Statement, ...] = (
         name_after=r"\s*(?:\bIF\s+EXISTS\b\s*)?",
     ),
     _Statement(
+        r"TRUNCATE\b",
+        _Rule(
+            Severity.BREAKING,
+            "Todas as linhas da tabela {name} apagadas — quem lê essa tabela perde os dados.",
+        ),
+        name_after=r"\s*(?:\bTABLE\b\s*)?(?:\bONLY\b\s*)?",
+    ),
+    _Statement(
         r"CREATE\s+(?:UNIQUE\s+)?INDEX\b",
         _Rule(Severity.SAFE, "Índice criado em {name}."),
         name_after=r"\bON\b\s*(?:\bONLY\b\s*)?",
@@ -631,13 +655,21 @@ def classify_statement(sql: str) -> Finding:
     """Classifica um único statement DDL.
 
     Verbo fora do mapeamento devolve `unknown` com o statement na razão, para o
-    time de dados ver o que o classificador não entendeu.
+    time de dados ver o que o classificador não entendeu. Um `ALTER TABLE` com
+    várias ações devolve a mais grave; `classify_sql` devolve todas.
     """
+    return worst(_statement_findings(sql))
+
+
+def _statement_findings(sql: str) -> list[Finding]:
+    """Um finding por ação do `ALTER TABLE`, e um só para os outros verbos."""
     raw = _strip_comments(sql)
     if not raw.strip():
         if sql.strip():
-            return Finding(Severity.NONE, "SQL COMMENT", "Apenas comentário — não altera schema.")
-        return Finding(Severity.NONE, "EMPTY STATEMENT", "Statement vazio.")
+            return [
+                Finding(Severity.NONE, "SQL COMMENT", "Apenas comentário — não altera schema.")
+            ]
+        return [Finding(Severity.NONE, "EMPTY STATEMENT", "Statement vazio.")]
 
     masked = _mask(raw)
     if _ALTER_TABLE_HEAD.match(masked):
@@ -653,7 +685,7 @@ def classify_statement(sql: str) -> Finding:
             else _identifier_at(raw, match.end())[0]
         )
         rule = (statement.refine and statement.refine(masked)) or statement.rule
-        return _finding(rule, _operation_of(match), name=name)
+        return [_finding(rule, _operation_of(match), name=name)]
 
     # `\w` casa dígito, então este verbo já foi um vazamento: um bloco de dados
     # estilo `pg_dump` dentro da migração faz o statement começar pelo primeiro
@@ -671,11 +703,14 @@ def classify_statement(sql: str) -> Finding:
     # `cpf_do_paciente_11122233344` já caem no mesmo `?`. Dois guardas onde um
     # decide tudo deixam o segundo sem teste que o mate.
     verb = re.match(r"\s*(\w+)", masked)
-    return Finding(
-        Severity.UNKNOWN,
-        verb.group(1).upper() if verb and verb.group(1).isalpha() else "?",
-        f"Statement não reconhecido pelo classificador: {_echo(raw)} — precisa de revisão manual.",
-    )
+    return [
+        Finding(
+            Severity.UNKNOWN,
+            verb.group(1).upper() if verb and verb.group(1).isalpha() else "?",
+            f"Statement não reconhecido pelo classificador: {_echo(raw)} — "
+            "precisa de revisão manual.",
+        )
+    ]
 
 
 _UNCLOSED = Finding(
@@ -695,7 +730,14 @@ def classify_sql(sql: str) -> list[Finding]:
     dele sairia `none`. O `unknown` no fim é o rastro. A razão não repete nada
     de dentro do trecho aberto, que pode ser dado de paciente.
     """
-    findings = [classify_statement(statement) for statement in split_statements(sql)]
+    # Uma ação por finding, e não a pior do statement: a mensagem do Slack
+    # lista uma linha por finding, e o `ADD COLUMN` de um `ALTER TABLE ... ADD
+    # COLUMN a, DROP COLUMN b` sumia atrás do `DROP`.
+    findings = [
+        finding
+        for statement in split_statements(sql)
+        for finding in _statement_findings(statement)
+    ]
     if _scan(sql)[1]:
         findings.append(_UNCLOSED)
     return findings

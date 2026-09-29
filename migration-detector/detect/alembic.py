@@ -245,6 +245,9 @@ class _Operation:
     signature: tuple[str, ...] = ()
     table: str = ""
     target: str = ""
+    # O parâmetro que qualifica a tabela. `create_foreign_key` chama o dele de
+    # `source_schema`; as outras operações, de `schema`.
+    schema: str = "schema"
 
 
 def _argument(operation: _Operation, call: ast.Call, parameter: str) -> ast.expr | None:
@@ -280,9 +283,20 @@ def _name_of(operation: _Operation, call: ast.Call, parameter: str) -> str:
     return ""
 
 
+def _table_of(operation: _Operation, call: ast.Call) -> str:
+    """A tabela, qualificada pelo schema quando ele é literal.
+
+    `op.drop_table("users", schema="clinic")` e `DROP TABLE clinic.users` são o
+    mesmo statement, e a frase tem que dizer a mesma tabela nos dois.
+    """
+    table = _name_of(operation, call, operation.table)
+    schema = text(_argument(operation, call, operation.schema))
+    return f"{schema}.{table}" if table and schema else table
+
+
 def _finding(label: str, operation: _Operation, call: ast.Call) -> Finding:
     names = {
-        "table": _name_of(operation, call, operation.table),
+        "table": _table_of(operation, call),
         "target": _name_of(operation, call, operation.target),
     }
     return Finding(
@@ -389,6 +403,22 @@ _OPERATIONS: dict[str, _Operation] = {
         table="table_name",
         target="constraint_name",
     ),
+    "create_foreign_key": _Operation(
+        # Mesma severidade do `ADD FOREIGN KEY` do SQL: linha sem correspondente
+        # impede a migração, mas quem lê a tabela não quebra.
+        Severity.CONTROLLED,
+        "Chave estrangeira {target} criada em {table}.",
+        signature=(
+            "constraint_name",
+            "source_table",
+            "referent_table",
+            "local_cols",
+            "remote_cols",
+        ),
+        table="source_table",
+        target="constraint_name",
+        schema="source_schema",
+    ),
     # --- SQL arbitrário ---
     "execute": _Operation(
         # Expandido por `_expand_execute`, que delega para `detect/sql.py`. A
@@ -449,7 +479,18 @@ def _refine_add_column(operation: _Operation, call: ast.Call) -> _Operation | No
         keyword.arg == "server_default" and not _is_none(keyword.value)
         for keyword in column.keywords
     )
-    unique = any(
+    # Chave primária é única e NOT NULL. `autoincrement=True` faz o banco
+    # numerar as linhas existentes, um valor por linha.
+    primary_key = any(
+        keyword.arg == "primary_key" and _is_true(keyword.value) for keyword in column.keywords
+    )
+    numbered = primary_key and any(
+        keyword.arg == "autoincrement" and _is_true(keyword.value)
+        for keyword in column.keywords
+    )
+    if numbered:
+        return None
+    unique = primary_key or any(
         keyword.arg == "unique" and _is_true(keyword.value) for keyword in column.keywords
     )
     if unique and (fills_a_value or not nullable):

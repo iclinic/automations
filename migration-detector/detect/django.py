@@ -284,28 +284,76 @@ _OPERATIONS: dict[str, _Operation] = {
 # o que ele carrega.
 
 
+def _field_class(module: ast.Module | None, field: ast.Call) -> str:
+    """O nome da classe do campo, com o apelido de import desfeito.
+
+    `from django.db.models import OneToOneField as O2O` faz a chamada dizer
+    `O2O`, e é pelo nome original que as regras abaixo reconhecem a classe.
+    """
+    name = call_name(field) or ""
+    if module is None:
+        return name
+    for node in ast.walk(module):
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.asname == name:
+                    return alias.name
+    return name
+
+
+# Os argumentos que preenchem as linhas existentes com um valor só. O Django
+# grava o `default` em toda linha; `db_default` faz o banco gravar; `auto_now` e
+# `auto_now_add` fazem o schema editor gravar a data corrente. Nos quatro casos
+# a coluna NOT NULL entra sem erro, e a coluna única colide na segunda linha.
+_FILLS_THE_ROWS = ("default", "db_default")
+_FILLS_WITH_NOW = ("auto_now", "auto_now_add")
+
+
 def _refine_add_field(
     walker: "_Walker", operation: _Operation, call: ast.Call
 ) -> _Operation | None:
     field = _argument(operation, call, "field")
-    if not isinstance(field, ast.Call):
+    if not isinstance(field, ast.Call) or has_unpacked_arguments(field):
+        # `models.CharField(**spec)`: `null`, `default` e `unique` podem estar
+        # dentro do valor, e um keyword ausente deixa de significar "não foi
+        # passado".
         return replace(
             operation,
             severity=Severity.UNKNOWN,
             reason="Campo {target} adicionado em {model} com uma definição que o "
             "classificador não consegue ler — " + MANUAL,
         )
-    nullable = any(
-        keyword.arg == "null" and _is_true(keyword.value) for keyword in field.keywords
-    )
-    has_default = any(keyword.arg == "default" for keyword in field.keywords)
+    cls = _field_class(walker.module, field)
+    if cls.endswith("ManyToManyField"):
+        # A M2M cria uma tabela de ligação e não põe coluna na tabela do
+        # modelo. `null` e `default` não se aplicam a ela.
+        return None
+    keywords = {keyword.arg: keyword.value for keyword in field.keywords}
+    for flag in ("unique", "primary_key"):
+        if flag in keywords and not isinstance(keywords[flag], ast.Constant):
+            return replace(
+                operation,
+                severity=Severity.UNKNOWN,
+                reason=f"Campo {{target}} adicionado em {{model}} com `{flag}` que não "
+                "é literal — " + MANUAL,
+            )
+    nullable = _is_true(keywords.get("null"))
+    has_default = any(name in keywords for name in _FILLS_THE_ROWS)
     fills_a_value = any(
-        keyword.arg == "default" and not _is_none(keyword.value) for keyword in field.keywords
+        name in keywords and not _is_none(keywords[name]) for name in _FILLS_THE_ROWS
+    ) or any(_is_true(keywords.get(name)) for name in _FILLS_WITH_NOW)
+    # `AutoField` e as irmãs numeram as linhas existentes: um valor por linha.
+    numbered = cls.endswith("AutoField")
+    # `OneToOneField` é único sem declarar nada: o `__init__` dele grava
+    # `unique=True` por cima do que vier nos argumentos. O sufixo cobre as
+    # subclasses de terceiros, como o `AutoOneToOneField` do django-annoying.
+    # Chave primária é única e NOT NULL.
+    unique = (
+        cls.endswith("OneToOneField")
+        or _is_true(keywords.get("unique"))
+        or _is_true(keywords.get("primary_key"))
     )
-    unique = any(
-        keyword.arg == "unique" and _is_true(keyword.value) for keyword in field.keywords
-    )
-    if unique and (fills_a_value or not nullable):
+    if unique and not numbered and (fills_a_value or not nullable):
         # O default é avaliado uma vez e gravado em toda linha existente,
         # callable incluído. NULL não colide no índice único; qualquer outro
         # valor repetido colide, e a migração para na segunda linha.
@@ -315,7 +363,7 @@ def _refine_add_field(
             reason="Campo único {target} adicionado em {model} com o mesmo valor "
             "em toda linha existente — " + DUPLICATE,
         )
-    if nullable or has_default:
+    if nullable or has_default or fills_a_value or numbered:
         return None
     return replace(
         operation,

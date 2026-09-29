@@ -218,8 +218,10 @@ Sai `unknown`:
   arquivo;
 - `AlterUniqueTogether` cujo valor não é literal, e ramo de
   `SeparateDatabaseAndState` montado fora da chamada;
-- operação de Alembic fora da tabela do parser: `op.create_foreign_key`,
-  `op.create_check_constraint`, `op.bulk_insert`, `op.batch_alter_table`;
+- operação de Alembic fora da tabela do parser: `op.create_check_constraint`,
+  `op.bulk_insert`, `op.batch_alter_table`;
+- `AddField` cujo campo recebe `**kwargs`, ou `unique`/`primary_key` que não é
+  literal;
 - verbo ou ação de SQL que o parser não reconhece, incluindo
   `ALTER TYPE ... RENAME`;
 - os quatro casos em que o dispatch não sabe a quem entregar o arquivo, na

@@ -827,6 +827,15 @@ class TestWithoutPreviousState:
 # separados não veem a troca de lugar entre modelo e campo.
 
 COMPARISONS = {
+    # A coluna continua a mesma; o que o `OneToOneField` acrescenta é o índice
+    # único.
+    "ForeignKey passou a OneToOneField": (
+        "models.ForeignKey(to='auth.user', on_delete=models.CASCADE)",
+        "models.OneToOneField(to='auth.user', on_delete=models.CASCADE)",
+        Severity.BREAKING,
+        "Campo `code` de `subject` passou de `ForeignKey` para `OneToOneField` — a "
+        "coluna ganha índice único",
+    ),
     "classe do campo mudou": (
         "models.IntegerField()",
         "models.BigIntegerField()",

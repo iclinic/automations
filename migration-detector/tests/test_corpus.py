@@ -484,6 +484,7 @@ ALEMBIC_ROWS: dict[str, tuple[str, Severity]] = {
     "create_unique_constraint": ("op.create_unique_constraint", Severity.BREAKING),
     "create_primary_key":       ("op.create_primary_key",       Severity.BREAKING),
     "drop_constraint":          ("op.drop_constraint",          Severity.CONTROLLED),
+    "create_foreign_key":       ("op.create_foreign_key",       Severity.CONTROLLED),
     "execute":                  ("op.execute",                  Severity.UNKNOWN),
     "f":                        ("op.f",                        Severity.NONE),
 }
@@ -544,7 +545,7 @@ class TestTheCorpusReachesEveryAlembicOperation:
 ALTER_TABLE_ROWS: dict[str, tuple[str, Severity]] = {
     "add_constraint":  ("ADD CONSTRAINT",     Severity.CONTROLLED),
     "add_unique_index": ("ADD UNIQUE INDEX",  Severity.BREAKING),
-    "add_key":         ("ADD PRIMARY KEY",    Severity.CONTROLLED),
+    "add_key":         ("ADD FOREIGN KEY",    Severity.CONTROLLED),
     "add_index":       ("ADD INDEX",          Severity.SAFE),
     "add_column":      ("ADD COLUMN",         Severity.SAFE),
     "drop_constraint": ("DROP CONSTRAINT",    Severity.CONTROLLED),
@@ -572,6 +573,7 @@ STATEMENT_ROWS: dict[str, tuple[str, Severity]] = {
     r"COMMENT\s+ON\b":                           ("COMMENT ON",      Severity.NONE),
     r"CREATE\s+(?:TEMP(?:ORARY)?\s+)?TABLE\b":   ("CREATE TABLE",    Severity.SAFE),
     r"DROP\s+TABLE\b":                           ("DROP TABLE",      Severity.BREAKING),
+    r"TRUNCATE\b":                               ("TRUNCATE",        Severity.BREAKING),
     r"CREATE\s+(?:UNIQUE\s+)?INDEX\b":           ("CREATE INDEX",    Severity.SAFE),
     r"DROP\s+INDEX\b":                           ("DROP INDEX",      Severity.CONTROLLED),
     r"CREATE\s+TYPE\b":                          ("CREATE TYPE",     Severity.SAFE),
