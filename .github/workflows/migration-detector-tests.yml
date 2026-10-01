@@ -1,0 +1,55 @@
+# A suíte do `migration-detector`, e o portão de regressão de determinismo da
+# QQ-2161.
+#
+# Até aqui nenhum workflow deste repositório rodava pytest: a suíte existia e
+# só rodava na máquina de quem escreveu. O aceite da QQ-2161 pede que o portão
+# de regressão rode no CI do `automations` **sem depender de checkout dos
+# repositórios consumidores** — por isso o corpus está versionado em
+# `migration-detector/tests/fixtures/corpus/` e `TestTheRealCorpus` pula sozinho
+# quando os clones dos consumidores não estão ao lado — `../consumer-django` e
+# companhia —, que é sempre o caso aqui. Ele também depende de
+# `migration-detector/tests/fixtures/.identifier-map.json`, que o `.gitignore`
+# mantém fora do repositório porque `iclinic/automations` é público: sem o mapa
+# ele pula, com a mesma forma de skip.
+#
+# `--cov-fail-under=90` é o outro número do aceite: cobertura por linha do
+# módulo `detect/` acima de 90%. Ele mede só `detect/` de propósito — é o
+# pacote que classifica, e é dele que o aceite fala.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'migration-detector/**'
+      - '.github/workflows/migration-detector-tests.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'migration-detector/**'
+      - '.github/workflows/migration-detector-tests.yml'
+  workflow_dispatch:
+
+jobs:
+  migration_detector_tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: migration-detector
+    steps:
+      - name: Checkout Automations Repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run the suite with the coverage floor of the acceptance criteria
+        run: |
+          python -m pytest -q \
+            --cov=detect \
+            --cov-report=term-missing \
+            --cov-fail-under=90

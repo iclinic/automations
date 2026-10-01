@@ -1,1 +1,10 @@
-openai==2.24.0
+# Vazio de propósito.
+#
+# O classificador determinístico de `detect/` é só biblioteca padrão, e o step
+# de análise do `action.yml` não roda mais `pip install`: não há dependência de
+# rede no caminho de execução da action.
+#
+# O `openai==2.24.0` que estava aqui existia para falar com a GitHub Models API,
+# desligada em 2026-07-30.
+#
+# O arquivo continua existindo porque `requirements-dev.txt` o inclui.

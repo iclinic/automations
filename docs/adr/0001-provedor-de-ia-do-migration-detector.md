@@ -4,6 +4,7 @@
 - Data: 2026-08-27
 - Revisão: 2026-08-28 — escopo ampliado para as três stacks consumidoras; decisão trocada de "provedor pago" (A4/A6/A8) para "classificador determinístico" (A3), com base na medição registrada abaixo
 - Revisão: 2026-09-02 — revisão de @almeidaraphael no PR #40: corrigido o caminho de publicação (a `@v4` já existia e apontava para trabalho não relacionado), o fator 3 deixou de sustentar a decisão, declaradas as regras de agregação de severidade e a leitura de `SeparateDatabaseAndState`, `RunPython` deixou de ser severidade fixa, e a conferência da amostra virou condição de aceite
+- Revisão: 2026-09-21 — revisão de aderência da implementação (branch `feature/QQ-2152-classificador-deterministico`): declarada a ordem total de severidade, corrigido o custo em linhas, e registradas as duas guardas em que a action ficou diferente do que esta ADR previa. Ver "Revisão de 2026-09-21".
 - Decisores: time de plataforma (dono do repo `iclinic/automations`), time de dados (consumidor do alerta)
 - Componente afetado: `migration-detector/`
 - Repositórios consumidores: os três serviços com banco que hoje chamam a action (um Django/MySQL, um Alembic/PostgreSQL, um TypeORM/PostgreSQL)
@@ -302,7 +303,7 @@ migration-detector/
   classify.py        entrypoint: hoje chama a IA, passa a chamar detect/
 ```
 
-Ordem de grandeza: 500 a 700 linhas mais testes. O `requirements.txt` fica vazio — sai o SDK `openai`, não entra nada, e os steps de `pip install` e cache saem junto. A suíte atual não quebra, porque nenhuma das 40 asserções toca a chamada HTTP.
+Ordem de grandeza: 500 a 700 linhas mais testes (estimativa errada por um fator de seis — ver "Revisão de 2026-09-21"). O `requirements.txt` fica vazio — sai o SDK `openai`, não entra nada, e os steps de `pip install` e cache saem junto. A suíte atual não quebra, porque nenhuma das 40 asserções toca a chamada HTTP.
 
 Do lado dos consumidores, os inputs não mudam. Os três workflows passam `github_token`, `slack_webhook_url` e `slack_channel`, e continuam passando exatamente isso. Muda só a tag: um PR de uma linha por repo, pelo motivo em "Publicação e versionamento". Zero secret novo.
 
@@ -383,7 +384,7 @@ Positivas:
 
 Negativas:
 
-- 500 a 700 linhas novas para manter, com um parser por stack;
+- 500 a 700 linhas novas para manter, com um parser por stack (medido: 4.346 — ver "Revisão de 2026-09-21");
 - o classificador precisa acompanhar mudanças de framework. Um upgrade de Django que troque a forma das operações, ou a migração do TypeORM 0.2 para 0.3+, exige revisitar o parser correspondente;
 - cerca de 3% dos arquivos ficam em `unknown` e voltam para revisão manual. É menos ruído que os 100% amarelos de hoje, mas não é zero;
 - a tabela de regras de severidade vira uma decisão de produto, não uma opinião do modelo. Alguém precisa ser dono dela — a sugestão é o time de dados, já que é quem consome o alerta.
@@ -404,6 +405,71 @@ As duas primeiras seguem valendo caso a A3 seja revertida ou caso a fase 2 seja 
 4. `breaking` deve bloquear o merge? Hoje só emite `::warning` e o PR segue. Com classificação determinística e auditável, bloquear passa a ser defensável — antes não era.
 5. Existe um quarto repositório com migrações que deveria estar coberto e não está? A regra de "migração que não casa glob nenhum vira aviso" resolve o repo que chama a action e não é visto por ela; não resolve o repo que não chama a action. Este segundo caso segue aberto e é varredura de organização, não código.
 6. A tabela de regras deixa `controlled` como piso para `RunPython` de dados puros, depois de extrair o DDL do corpo. O time de dados concorda com esse piso, ou uma migração de dados que toque milhões de linhas merece severidade própria?
+
+## Revisão de 2026-09-21
+
+Escrita durante a revisão de aderência da implementação. Cada item aqui é uma
+correção desta ADR, não do código — exceto onde diz o contrário.
+
+### A ordem de severidade é total, e `unknown` fica acima de `controlled`
+
+Esta ADR declarava a regra de piso só nos dois extremos: `unknown` impede `none`
+e `safe`, e não derruba `breaking`. Onde `unknown` fica em relação a
+`controlled` não estava escrito, e a implementação precisou de uma ordem total
+para agregar. A ordem adotada é:
+
+```
+none < safe < controlled < unknown < breaking
+```
+
+`unknown` acima de `controlled` porque "não consegui classificar" tem que valer
+mais que uma classificação benigna quando se agrega a severidade de um arquivo.
+O efeito visível é que um arquivo com um `ADD COLUMN NOT NULL` mais uma operação
+não parseada chega ao Slack como 🟠, e a mudança controlada que o classificador
+entendeu não aparece no cabeçalho — ela continua listada no corpo da mensagem.
+
+A ordem é a linha zero da tabela de regras de severidade, e a pergunta aberta 3
+já pede um dono para essa tabela.
+
+### O custo em linhas foi subestimado por um fator de seis
+
+Esta ADR estimava "500 a 700 linhas mais testes", e repetia o número na lista de
+consequências negativas. O medido na entrega: `detect/` tem 4.346 linhas de
+arquivo e 1.272 statements executáveis; testes e fixtures somam cerca de 11 mil
+linhas.
+
+A maior parte da diferença está em `detect/history.py`, que esta ADR trata como
+uma linha do desenho e é o módulo mais longo dos oito, e em comentário e
+docstring. A decisão continua de pé — nenhum secret, nenhum fornecedor, 98,3%
+medido —, mas o fator 3 da comparação pesou "esforço alto" contra "esforço
+mínimo" da A5 com o número errado. Quem reabrir esta comparação daqui a dois
+anos precisa do número certo.
+
+### Duas guardas em que a action ficou diferente do previsto
+
+**Webhook ausente.** Esta ADR prescreveu `::warning::` para o caminho sem
+`slack_webhook_url`. A implementação escolheu `::error::` e `exit 1`, o que é
+mais duro: a guarda ficava antes do `git diff`, e um repositório sem a variable
+configurada passava a ter todo PR vermelho, inclusive o de um `README.md`.
+
+A guarda passou para depois do filtro, e agora depende de o PR ter migração:
+`::warning::` e job verde quando não tem, `::error::` e job vermelho quando tem.
+É mais duro que o previsto no caso com migração, e a razão é a mesma que levou
+esta ADR a escrever `has_files` explicitamente: classificar sem ter para onde
+avisar é o silêncio que fez a falha da API de IA rodar quatro semanas.
+
+**Migração removida.** Esta ADR não trata o caso. `git diff --name-only` lista o
+arquivo que o PR apagou, o classificador tentava abri-lo e o step morria — e o
+step do Slack nem chegava a rodar. A action passa a usar `--diff-filter=d`, o
+que assume por escrito que **remover o arquivo de migração não é mudança de
+schema**: o que já rodou no banco continua rodado. Reverter uma migração exige
+uma migração nova, e essa aparece no diff como qualquer outra.
+
+### `confidence` não foi removido
+
+O output foi mantido por compatibilidade com quem já o lê, fixado em `1.0` para
+severidade resolvida e `0.0` para `unknown`. Era decisão aberta na etapa 7 da
+QQ-2152.
 
 ## Referências
 
