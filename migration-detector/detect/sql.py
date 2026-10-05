@@ -188,11 +188,12 @@ _LONG_NUMBER = re.compile(r"\d{4,}")
 def _echo(raw: str, limit: int = 120) -> str:
     """Statement em uma linha para o Slack, cortado antes do primeiro valor.
 
-    O corte não é cosmético. Statement não reconhecido cai aqui, `INSERT` e
-    `UPDATE` são statements não reconhecidos, e migração de dados carrega dado de
-    paciente — no consumidor Django/MySQL e nas duas bases do consumidor
-    Doctrine, onde metade dos arquivos é migração de dados. A razão vai para um
-    canal do Slack, então nenhum valor pode entrar nela.
+    O corte não é cosmético. Statement não reconhecido cai aqui — um `REPLACE
+    INTO` ou um `CALL` de procedure —, e SQL que mexe em dado carrega dado de
+    paciente, no consumidor Django/MySQL e nas duas bases do consumidor Doctrine.
+    A razão vai para um canal do Slack, então nenhum valor pode entrar nela.
+    (`INSERT`, `UPDATE` e `DELETE` têm linha na tabela e não passam por aqui: a
+    razão deles cita só a tabela.)
 
     São dois cortes porque um valor chega de duas formas. Entre aspas é o caso
     comum. Solto é o que `CALL migrate_subject(12345678900)` faz: sem aspa
@@ -571,6 +572,24 @@ def _refine_alter_type(masked: str) -> _Rule | None:
     return None
 
 
+def _refine_delete(masked: str) -> _Rule | None:
+    # Sem `WHERE` o `DELETE` é um `TRUNCATE` escrito de outro jeito, e sai com a
+    # mesma severidade dele. O `WHERE` é procurado no texto mascarado: dentro de
+    # um literal ou de um nome citado ele não filtra nada.
+    if not re.search(r"\bWHERE\b", masked, re.I):
+        return _Rule(
+            Severity.BREAKING,
+            "Todas as linhas da tabela {name} apagadas por DELETE sem WHERE — "
+            "quem lê essa tabela perde os dados.",
+        )
+    return None
+
+
+# Migração de dados escrita em SQL cru vale o mesmo que o `RunPython` de dados do
+# Django: não muda o schema, mas mexe em linha que alguém lê.
+_DATA_MIGRATION = "migração de dados, sem DDL. Confirmar o volume e o impacto com o time de dados."
+
+
 @dataclass(frozen=True)
 class _Statement:
     head: str
@@ -606,6 +625,22 @@ _STATEMENT_RULES: tuple[_Statement, ...] = (
             "Todas as linhas da tabela {name} apagadas — quem lê essa tabela perde os dados.",
         ),
         name_after=r"\s*(?:\bTABLE\b\s*)?(?:\bONLY\b\s*)?",
+    ),
+    _Statement(
+        r"INSERT\b",
+        _Rule(Severity.CONTROLLED, "Linhas inseridas em {name} — " + _DATA_MIGRATION),
+        name_after=r"\s*(?:\bIGNORE\b\s*)?(?:\bINTO\b\s*)?",
+    ),
+    _Statement(
+        r"UPDATE\b",
+        _Rule(Severity.CONTROLLED, "Linhas de {name} atualizadas — " + _DATA_MIGRATION),
+        name_after=r"\s*(?:\bIGNORE\b\s*)?(?:\bONLY\b\s*)?",
+    ),
+    _Statement(
+        r"DELETE\b",
+        _Rule(Severity.CONTROLLED, "Linhas de {name} removidas — " + _DATA_MIGRATION),
+        name_after=r"\s*(?:\bFROM\b\s*)?(?:\bONLY\b\s*)?",
+        refine=_refine_delete,
     ),
     _Statement(
         r"CREATE\s+(?:UNIQUE\s+)?INDEX\b",

@@ -9,10 +9,10 @@
  *
  * - o segundo argumento — o array de parâmetros — nunca é lido, então nada do
  *   que ele carrega pode aparecer numa razão;
- * - `UPDATE` é verbo fora da tabela de statements do `detect/sql.py`, então sai
- *   `unknown` com o statement elidido antes do primeiro valor. É a mesma
- *   resposta que o `RunSQL` do Django e o `op.execute()` do Alembic dão para uma
- *   migração de dados.
+ * - `UPDATE` é migração de dados e sai `controlled`, com a tabela na razão e
+ *   nenhum valor. É a mesma severidade do `RunPython` de dados do Django, e a
+ *   mesma que o `RunSQL` do Django e o `op.execute()` do Alembic dão para o
+ *   mesmo statement.
  */
 
 declare(strict_types=1);

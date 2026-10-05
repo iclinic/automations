@@ -307,7 +307,7 @@ class TestNothingLeavesTheActionCarryingData:
             "dev",
         )
         assert "• `db/0042_backfill_subjects.sql` — `INSERT`: " in text
-        assert "precisa de revisão manual." in text
+        assert "migração de dados" in text
 
 
 # ---------------------------------------------------------------------------

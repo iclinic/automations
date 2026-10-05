@@ -5,9 +5,9 @@
  * ---------------------------
  *
  * A migração de dados do lado PostgreSQL: `INSERT` e `DELETE` com parâmetros
- * nomeados. As duas saem `unknown` porque são verbos fora da tabela de
- * statements — não porque o parser não leu a chamada —, e o statement na razão
- * vem cortado antes do primeiro valor.
+ * nomeados. As duas saem `controlled`, como migração de dados, com a tabela na
+ * razão e nenhum valor. O `DELETE` tem `WHERE`; sem ele seria `breaking`, como
+ * o `TRUNCATE`.
  *
  * Migração de dados é onde dado de cliente entra numa migração, e a razão vai
  * para um canal do Slack. `tests/test_pii.py` planta o dado nesta mesma posição.

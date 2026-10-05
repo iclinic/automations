@@ -585,9 +585,7 @@ class TestUnrecognizedVerbsReturnUnknown:
             "PREPARE stmt FROM @query",
             "EXECUTE stmt",
             "DEALLOCATE PREPARE stmt",
-            "INSERT INTO `claim_version`(version) VALUES ('3.01.00')",
-            "UPDATE bookings_booking SET status = 1 WHERE clinic_id = 2",
-            "DELETE FROM bookings_booking WHERE id = 1",
+            "REPLACE INTO bookings_booking (id, status) VALUES (1, 2)",
             "CREATE MATERIALIZED VIEW mv AS SELECT 1",
             "GRANT SELECT ON schedule TO analytics",
             "CALL some_procedure()",
@@ -603,6 +601,59 @@ class TestUnrecognizedVerbsReturnUnknown:
         assert finding.severity is Severity.UNKNOWN
         assert "REFRESH" in finding.operation
         assert finding.reason
+
+
+# ---------------------------------------------------------------------------
+# Migração de dados em SQL cru: controlled, como o RunPython do Django
+# ---------------------------------------------------------------------------
+
+
+class TestDataVerbsAreControlled:
+    @pytest.mark.parametrize(
+        ("sql", "operation"),
+        [
+            ("INSERT INTO `claim_version`(version) VALUES ('3.01.00')", "INSERT"),
+            ("INSERT IGNORE INTO claim_version (version) VALUES (:version)", "INSERT"),
+            ("insert into claim_version (version) select version from staging", "INSERT"),
+            ("UPDATE bookings_booking SET status = 1 WHERE clinic_id = 2", "UPDATE"),
+            ("UPDATE ONLY bookings_booking SET status = :status", "UPDATE"),
+            ("DELETE FROM bookings_booking WHERE id = 1", "DELETE"),
+            ('DELETE FROM ONLY "bookings"."booking" WHERE id = :id', "DELETE"),
+        ],
+    )
+    def test_data_verb_is_controlled(self, sql, operation):
+        finding = classify_statement(sql)
+        assert finding.severity is Severity.CONTROLLED
+        assert finding.operation == operation
+
+    @pytest.mark.parametrize(
+        ("sql", "table"),
+        [
+            ("INSERT INTO claim_version (version) VALUES ('3.01.00')", "`claim_version`"),
+            ("INSERT IGNORE INTO claim_version (version) VALUES (:v)", "`claim_version`"),
+            ("UPDATE ONLY bookings_booking SET status = 1", "`bookings_booking`"),
+            ("DELETE FROM ONLY bookings_booking WHERE id = 1", "`bookings_booking`"),
+        ],
+    )
+    def test_data_verb_names_the_table_and_not_the_keyword(self, sql, table):
+        reason = classify_statement(sql).reason
+        assert table in reason
+        assert "`IGNORE`" not in reason
+        assert "`ONLY`" not in reason
+
+    def test_data_verb_reason_asks_the_data_team_for_volume_and_impact(self):
+        reason = classify_statement("UPDATE t SET c = 1 WHERE id = 2").reason
+        assert "time de dados" in reason
+
+    def test_delete_without_where_is_breaking_like_truncate(self):
+        # Sem `WHERE`, o `DELETE` apaga a tabela inteira — o mesmo efeito do
+        # `TRUNCATE`, que já é `breaking`. A mesma mudança não pode sair com duas
+        # cores conforme o verbo que a escreveu.
+        assert severity_of("DELETE FROM bookings_booking") is Severity.BREAKING
+        assert severity_of("DELETE FROM ONLY bookings_booking") is Severity.BREAKING
+
+    def test_a_where_inside_a_quoted_name_does_not_count_as_a_filter(self):
+        assert severity_of('DELETE FROM "audit WHERE log"') is Severity.BREAKING
 
     def test_alter_table_with_an_unrecognized_action_is_unknown(self):
         finding = classify_statement("ALTER TABLE orders DISABLE TRIGGER ALL")
@@ -912,6 +963,7 @@ ALTER_TABLE_REFINER_TRIGGERS = {
 STATEMENT_REFINER_TRIGGERS = {
     "_refine_create_index": "CREATE UNIQUE INDEX ix ON t (a)",
     "_refine_alter_type": "ALTER TYPE e ADD VALUE 'x'",
+    "_refine_delete": "DELETE FROM t",
 }
 
 
@@ -1065,18 +1117,25 @@ class TestOperationIsStable:
 
 
 class TestReasonsNeverLeakLiterals:
-    def test_unrecognized_insert_does_not_echo_subject_data(self):
+    def test_insert_does_not_echo_subject_data(self):
         finding = classify_statement(
             "INSERT INTO subjects (cpf, nome) VALUES ('12345678900', 'Maria Silva')"
+        )
+        assert "12345678900" not in finding.reason
+        assert "Maria Silva" not in finding.reason
+
+    def test_update_does_not_echo_values(self):
+        finding = classify_statement("UPDATE subjects SET nome = 'Maria Silva' WHERE id = 1")
+        assert "Maria Silva" not in finding.reason
+
+    def test_unrecognized_statement_is_echoed_up_to_the_first_value(self):
+        finding = classify_statement(
+            "REPLACE INTO subjects (cpf, nome) VALUES ('12345678900', 'Maria Silva')"
         )
         assert finding.severity is Severity.UNKNOWN
         assert "12345678900" not in finding.reason
         assert "Maria Silva" not in finding.reason
-        assert "INSERT INTO subjects" in finding.reason
-
-    def test_unrecognized_update_does_not_echo_values(self):
-        finding = classify_statement("UPDATE subjects SET nome = 'Maria Silva' WHERE id = 1")
-        assert "Maria Silva" not in finding.reason
+        assert "REPLACE INTO subjects" in finding.reason
 
     def test_an_unquoted_identifier_is_not_echoed(self):
         # Sem aspa nenhuma, e é dado de paciente do mesmo jeito. O corte por

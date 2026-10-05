@@ -553,7 +553,7 @@ class TestNamedParameters:
         assert finding.severity is Severity.BREAKING
         assert finding.operation == "DROP COLUMN"
 
-    def test_a_data_statement_with_named_parameters_is_unknown(self):
+    def test_a_data_statement_with_named_parameters_is_controlled(self):
         source = migration(
             "$this->addSql(\n"
             "    'UPDATE freight_note SET carrier_code = :code WHERE id = :id',\n"
@@ -561,11 +561,10 @@ class TestNamedParameters:
             ");"
         )
         finding = only(source)
-        assert finding.severity is Severity.UNKNOWN
+        assert finding.severity is Severity.CONTROLLED
         assert finding.operation == "UPDATE"
-        assert finding.reason.endswith(MANUAL)
-        # O verbo saiu, o statement saiu, e o array de parâmetros não.
-        assert "UPDATE freight_note SET carrier_code = :code" in finding.reason
+        # A tabela saiu, e o array de parâmetros não.
+        assert "`freight_note`" in finding.reason
         assert "none" not in finding.reason
 
     @pytest.mark.parametrize(
@@ -596,6 +595,8 @@ class TestNamedParameters:
             "INSERT INTO freight_note (carrier_code) VALUES ('12345678900')",
             'INSERT INTO freight_note (carrier_code) VALUES ("Maria Silva")',
             "UPDATE freight_note SET carrier_code = '12345678900'",
+            "REPLACE INTO freight_note (carrier_code) VALUES ('12345678900')",
+            'REPLACE INTO freight_note (carrier_code) VALUES ("Maria Silva")',
             "CALL settle_freight(12345678900)",
         ],
     )
@@ -605,15 +606,14 @@ class TestNamedParameters:
         Migração de dados é a maioria do corpus deste consumidor, e a razão de um
         statement não reconhecido é o statement ecoado. O corte tem que valer
         aqui igual: nem valor entre aspas — das três aspas — nem número longo
-        solto pode sobreviver.
+        solto pode sobreviver. Vale para o DML, que tem linha na tabela, e para o
+        verbo que não tem e sai ecoado.
         """
         finding = only(migration(add_sql(sql)) if "'" not in sql else migration(
             "$this->addSql(<<<'SQL'\n" f"{sql}\n" "SQL);"
         ))
-        assert finding.severity is Severity.UNKNOWN
         assert "12345678900" not in finding.reason
         assert "Maria Silva" not in finding.reason
-        assert finding.reason.endswith(MANUAL)
 
     def test_the_reason_still_names_the_verb_it_did_not_understand(self):
         # Guarda pareado: um corte que apagasse a frase inteira passaria em tudo
@@ -621,12 +621,14 @@ class TestNamedParameters:
         finding = only(
             migration(
                 "$this->addSql(<<<'SQL'\n"
-                "INSERT INTO freight_note (carrier_code) VALUES ('12345678900')\n"
+                "REPLACE INTO freight_note (carrier_code) VALUES ('12345678900')\n"
                 "SQL);"
             )
         )
-        assert finding.operation == "INSERT"
-        assert "INSERT INTO freight_note (carrier_code) VALUES" in finding.reason
+        assert finding.severity is Severity.UNKNOWN
+        assert finding.operation == "REPLACE"
+        assert finding.reason.endswith(MANUAL)
+        assert "REPLACE INTO freight_note (carrier_code) VALUES" in finding.reason
 
 
 # ---------------------------------------------------------------------------

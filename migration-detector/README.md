@@ -199,15 +199,18 @@ nova que aceita `NULL` ou traz `DEFAULT` (`AddField`, `op.add_column`,
 `controlled` — coluna nova `NOT NULL` sem `DEFAULT`, que barra a migração numa
 tabela que já tem linha; coluna que passou a aceitar `NULL`; coluna que ficou
 mais larga; mudança de `DEFAULT`; remoção de índice ou de constraint;
-`unique_together` esvaziado; e `RunPython` de dados, cujo corpo o classificador
-varre por DDL e não encontra nenhum — quando encontra, quem decide é o DDL.
+`unique_together` esvaziado; `RunPython` de dados, cujo corpo o classificador
+varre por DDL e não encontra nenhum — quando encontra, quem decide é o DDL; e a
+mesma migração de dados escrita em SQL cru, `INSERT`, `UPDATE` e `DELETE` com
+`WHERE`, em qualquer stack. A razão cita a tabela e nenhum valor.
 
 `unknown` — a seção abaixo.
 
 `breaking` — remoção de coluna ou de tabela (`RemoveField`, `DeleteModel`,
 `op.drop_column`, `op.drop_table`, `DROP COLUMN`, `DROP TABLE`); renomeação de
 qualquer das duas; mudança de tipo; coluna que passou a `NOT NULL`; coluna que
-ficou mais curta; e todo índice ou constraint **único** novo
+ficou mais curta; `TRUNCATE`, e o `DELETE` sem `WHERE`, que tem o mesmo efeito;
+e todo índice ou constraint **único** novo
 (`AddConstraint(UniqueConstraint)`, `op.create_unique_constraint`,
 `op.create_index(unique=True)`, `CREATE UNIQUE INDEX`, `ADD CONSTRAINT ...
 UNIQUE`, `unique_together` que passou a exigir combinação nova). O índice único
@@ -238,9 +241,7 @@ Sai `unknown`:
 - `AddField` cujo campo recebe `**kwargs`, ou `unique`/`primary_key` que não é
   literal;
 - verbo ou ação de SQL que o parser não reconhece, incluindo
-  `ALTER TYPE ... RENAME` e os verbos de DML — `INSERT`, `UPDATE`, `DELETE` —,
-  que é o que faz uma migração de dados escrita em SQL cru sair `unknown` em
-  qualquer stack;
+  `ALTER TYPE ... RENAME`, `REPLACE INTO` e `CALL`;
 - `$this->addSql()` do Doctrine cujo primeiro argumento está numa das duas
   sintaxes de string do PHP que interpolam, ou não é um literal inteiro;
 - os cinco casos em que o dispatch não sabe a quem entregar o arquivo, na
@@ -586,7 +587,7 @@ por isso que a fixture escrita não é redundante com ele. Dois achados concreto
 - no Alembic, os `DROP TABLE` e `DROP COLUMN` viviam só em `downgrade()`, que o
   parser ignora por especificação — as regras mais destrutivas nunca eram
   alcançadas por dado real (QQ-2161);
-- no Doctrine, o mesmo: 18 arquivos e nenhum `DROP TABLE` ou `DROP COLUMN` em
+- no Doctrine, o mesmo: 19 arquivos e nenhum `DROP TABLE` ou `DROP COLUMN` em
   `up()`. Sem as fixturas de `doctrine/`, um `DROP TABLE` classificado como
   `safe` passaria a suíte inteira, nos dois dialetos.
 
@@ -605,23 +606,20 @@ reconferida por `TestTheRealCorpus`, que pula sozinho quando os clones — ou o
 mapa — não estão ao lado, que é sempre o caso no CI, como o aceite exige.
 
 A do Doctrine tem duas colunas que as outras não têm, e as duas por causa do que
-o cartão da SHS-606 protege: a contagem de arquivos **por diretório de banco**, e
-a separação entre "arquivo com `unknown`" e "DDL sem classificação". Dos 18
-arquivos do consumidor, 10 voltam com pelo menos um `unknown` — a taxa por
-arquivo mais baixa das quatro stacks — e **todos os 13 `unknown` são verbos de
-DML**: `INSERT`, `UPDATE` e `DELETE`, que estão fora da tabela de statements de
-`detect/sql.py` nas quatro stacks, do mesmo jeito que estão para um `RunSQL` do
-Django ou um `op.execute()` do Alembic. Nenhum statement de DDL dos 18 arquivos
-deixou de ser decidido, e `test_every_doctrine_unknown_is_a_data_verb_and_no_ddl_escaped`
-afirma isso por igualdade de conjunto: um `DROP COLUMN` que passasse a sair
-`unknown` acrescentaria `DROP COLUMN` ao conjunto e derrubaria o teste.
+o cartão da SHS-606 protege: a contagem de arquivos **por diretório de banco**
+(7 no MySQL, 12 no PostgreSQL), e a de statements. São 38 statements nos 19
+arquivos, e nenhum sai `unknown`.
 
-A taxa baixa é, então, propriedade do corpus e não do parser — metade das
-migrações desse consumidor é migração de dados escrita em SQL cru, enquanto as do
-Django passam por `RunPython`, que tem linha própria na tabela. Trocar isso
-exigiria dar linha de severidade a `INSERT`, `UPDATE` e `DELETE` em
-`detect/sql.py`, o que mudaria a classificação das quatro stacks de uma vez; é
-decisão de tabela de severidade, não deste parser, e a QQ-2162 é onde ela cabe.
+Metade das migrações desse consumidor é migração de dados escrita em SQL cru,
+enquanto as do Django passam por `RunPython`. Enquanto `INSERT`, `UPDATE` e
+`DELETE` ficavam fora da tabela de statements, 10 dos 18 arquivos de então
+saíam `unknown` — a taxa por arquivo mais baixa das quatro stacks, sem que
+nenhum DDL tivesse deixado de ser decidido. Os três verbos ganharam linha
+`controlled` em `detect/sql.py`, a mesma severidade do `RunPython` de dados, e
+a mudança vale para as quatro stacks de uma vez: o mesmo `UPDATE` num `RunSQL`
+do Django, num `op.execute()` do Alembic ou num `queryRunner.query()` do
+TypeORM sai igual. `test_every_doctrine_data_statement_is_controlled` afirma os
+três verbos por igualdade de conjunto, e todos com `controlled`.
 
 ## Resultado esperado para o time de dados
 

@@ -158,15 +158,10 @@ RESIDUE: dict[str, str] = {
         "ação de ALTER COLUMN fora da tabela",
     # --- o resíduo do Doctrine, nas duas bases ----------------------------
     #
-    # Metade do corpus real deste consumidor é migração de dados, e `INSERT`,
-    # `UPDATE` e `DELETE` são verbos fora da tabela de statements do `sql.py` nas
-    # quatro stacks. As duas primeiras linhas são esse caso, uma por base — e são
-    # elas que explicam por que a taxa de determinismo por arquivo deste stack é
-    # a mais baixa das quatro sem que nenhum DDL tenha deixado de ser decidido.
-    "doctrine/Migrations/mysql/Version20250101120100.php":
-        "UPDATE com parâmetros nomeados — verbo de DML, fora da tabela de statements",
-    "doctrine/Migrations/pgsql/Version20250201120300.php":
-        "INSERT e DELETE com parâmetros nomeados — idem, na outra base",
+    # A migração de dados com parâmetros nomeados, que é metade do corpus real
+    # deste consumidor, não está aqui: `INSERT`, `UPDATE` e `DELETE` têm linha
+    # `controlled` na tabela de statements do `sql.py`. O que sobra é SQL que o
+    # arquivo não escreve por inteiro.
     "doctrine/Migrations/mysql/Version20250101120400.php":
         "heredoc interpolado — o SQL que roda pode não ser o que está escrito",
     "doctrine/Migrations/mysql/Version20250101120500.php":
@@ -226,13 +221,12 @@ REAL_CORPUS = {
         # depois de `Version` deixa fora o `VersionHelper.php` do runner, que não
         # é migração; é o mesmo recorte do glob de `migration_paths`.
         "glob": "Migrations/*/Version2*.php",
-        "files": 18,
-        # A mais alta das quatro stacks, e não é o parser: 10 dos 18 arquivos são
-        # migração de dados, e `INSERT`, `UPDATE` e `DELETE` são verbos fora da
-        # tabela de statements do `sql.py` — a mesma resposta que o `RunSQL` do
-        # Django e o `op.execute()` do Alembic dão. Todo statement de DDL dos 18
-        # arquivos é decidido; ver `REAL_DOCTRINE`, que separa os dois números.
-        "unknown_files": 10,
+        "files": 19,
+        # Eram 10 de 18 enquanto `INSERT`, `UPDATE` e `DELETE` ficavam fora da
+        # tabela de statements do `sql.py`: metade das migrações deste consumidor
+        # é migração de dados em SQL cru. Com o DML valendo `controlled`, como o
+        # `RunPython` de dados do Django, nenhum arquivo sobra sem decisão.
+        "unknown_files": 0,
     },
 }
 
@@ -246,12 +240,12 @@ REAL_TYPEORM_STATEMENTS = {"total": 133, "unknown": 2}
 # a base do financeiro sem proteção —, então a contagem por diretório de banco é
 # afirmada e não deduzida.
 REAL_DOCTRINE = {
-    "statements": {"total": 36, "unknown": 13},
-    # Os verbos que sobram sem classificação, e a razão de a taxa por arquivo ser
-    # o que é. Igualdade, e não contenção: se um DDL passar a sair `unknown`, o
-    # conjunto cresce e o teste cai.
-    "unknown_operations": {"INSERT", "UPDATE", "DELETE"},
-    "databases": {"mysql": 7, "pgsql": 11},
+    "statements": {"total": 38, "unknown": 0},
+    # Os verbos de DML que o corpus real usa, todos com linha própria na tabela.
+    # Igualdade, e não contenção: um verbo de dados novo no consumidor muda o
+    # conjunto e pede que alguém confira a severidade dele.
+    "data_operations": {"INSERT", "UPDATE", "DELETE"},
+    "databases": {"mysql": 7, "pgsql": 12},
 }
 
 
@@ -627,6 +621,9 @@ STATEMENT_ROWS: dict[str, tuple[str, Severity]] = {
     r"CREATE\s+(?:TEMP(?:ORARY)?\s+)?TABLE\b":   ("CREATE TABLE",    Severity.SAFE),
     r"DROP\s+TABLE\b":                           ("DROP TABLE",      Severity.BREAKING),
     r"TRUNCATE\b":                               ("TRUNCATE",        Severity.BREAKING),
+    r"INSERT\b":                                 ("INSERT",          Severity.CONTROLLED),
+    r"UPDATE\b":                                 ("UPDATE",          Severity.CONTROLLED),
+    r"DELETE\b":                                 ("DELETE",          Severity.CONTROLLED),
     r"CREATE\s+(?:UNIQUE\s+)?INDEX\b":           ("CREATE INDEX",    Severity.SAFE),
     r"DROP\s+INDEX\b":                           ("DROP INDEX",      Severity.CONTROLLED),
     r"CREATE\s+TYPE\b":                          ("CREATE TYPE",     Severity.SAFE),
@@ -876,35 +873,41 @@ class TestTheRealCorpus:
         assert {f.operation for f in unknown} == {"ALTER TYPE"}
 
     def test_the_doctrine_statements_did_not_lose_coverage(self):
-        """O segundo número do consumidor Doctrine: statements, não arquivos."""
+        """O segundo número do consumidor Doctrine: statements, não arquivos.
+
+        O total é piso, pelo mesmo motivo do TypeORM: o consumidor cresce, e um
+        `==` ficaria vermelho a cada migração nova sem nenhuma classificação ter
+        mudado. Quem guarda a qualidade é o teto do `unknown`.
+        """
         files = _real_files("doctrine")
         if not files:
             pytest.skip(_why_it_skipped("doctrine"))
         findings = [f for p in files for f in detect.classify_file(p)]
         unknown = [f for f in findings if f.severity is Severity.UNKNOWN]
-        assert len(findings) == REAL_DOCTRINE["statements"]["total"]
-        assert len(unknown) <= REAL_DOCTRINE["statements"]["unknown"]
+        assert len(findings) >= REAL_DOCTRINE["statements"]["total"]
+        assert len(unknown) <= REAL_DOCTRINE["statements"]["unknown"], [
+            f.operation for f in unknown
+        ]
 
-    def test_every_doctrine_unknown_is_a_data_verb_and_no_ddl_escaped(self):
-        """A afirmação que a taxa por arquivo sozinha não faz.
+    def test_every_doctrine_data_statement_is_controlled(self):
+        """Metade do consumidor é migração de dados, e ela sai `controlled`.
 
-        10 dos 18 arquivos voltam com pelo menos um `unknown`, e a leitura fácil
-        disso é "o parser lê mal PHP". O que está acontecendo é outra coisa: todo
-        `unknown` do consumidor é um verbo de DML, e nenhum statement de DDL
-        deixou de ser decidido. Um `DROP COLUMN` que passasse a sair `unknown`
-        acrescentaria `DROP COLUMN` ao conjunto e derrubaria este teste.
+        É a mesma severidade do `RunPython` de dados do Django. O `DELETE` sem
+        `WHERE` seria `breaking`, como o `TRUNCATE`; o corpus real não tem
+        nenhum, e um que entrasse derrubaria este teste para alguém olhar.
         """
         files = _real_files("doctrine")
         if not files:
             pytest.skip(_why_it_skipped("doctrine"))
-        unknown = [
+        data = [
             f
             for p in files
             for f in detect.classify_file(p)
-            if f.severity is Severity.UNKNOWN
+            if f.operation in REAL_DOCTRINE["data_operations"]
         ]
-        assert unknown  # senão o conjunto abaixo é vazio e não afirma nada
-        assert {f.operation for f in unknown} == REAL_DOCTRINE["unknown_operations"]
+        assert data  # senão o conjunto abaixo é vazio e não afirma nada
+        assert {f.operation for f in data} == REAL_DOCTRINE["data_operations"]
+        assert {f.severity for f in data} == {Severity.CONTROLLED}
 
     def test_both_databases_of_the_doctrine_consumer_are_in_the_flow(self):
         """O motivo de existir do cartão, medido.
@@ -921,7 +924,11 @@ class TestTheRealCorpus:
         for path in files:
             assert detect.stack_for(path, detect.read_source(path)) == "doctrine", path
             by_database[path.parent.name] = by_database.get(path.parent.name, 0) + 1
-        assert by_database == REAL_DOCTRINE["databases"]
+        # As bases são igualdade; a contagem de cada uma é piso, porque as duas
+        # recebem migração nova.
+        assert set(by_database) == set(REAL_DOCTRINE["databases"])
+        for database, floor in REAL_DOCTRINE["databases"].items():
+            assert by_database[database] >= floor, database
 
     def test_the_adr_fixtures_say_what_the_real_files_say(self):
         """As fixturas da ADR reproduzem o veredito dos arquivos reais.

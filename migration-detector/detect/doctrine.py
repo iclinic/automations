@@ -72,10 +72,10 @@ vai para um canal do Slack é exatamente o vazamento que `tests/test_pii.py`
 guarda.
 
 O primeiro argumento continua indo para o `detect/sql.py` como qualquer outro, e
-`INSERT`, `UPDATE` e `DELETE` são verbos fora da tabela de statements: saem
-`unknown`, com o statement elidido antes do primeiro valor por `_echo`. É a mesma
-resposta que o `RunSQL` do Django e o `op.execute()` do Alembic dão para uma
-migração de dados, e ela tem que continuar sendo a mesma.
+`INSERT`, `UPDATE` e `DELETE` saem `controlled`, como migração de dados, com a
+tabela na razão e nenhum valor. É a mesma resposta que o `RunSQL` do Django e o
+`op.execute()` do Alembic dão para o mesmo statement, e ela tem que continuar
+sendo a mesma.
 
 Onde o scanner tem teto, e o teto é conhecido
 ---------------------------------------------

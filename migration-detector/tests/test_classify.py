@@ -773,8 +773,9 @@ class TestSlackTextNeverEchoesMigrationData:
             "7",
             "dev",
         )
-        assert text.startswith("🟠 *Não classificado* — o classificador não entendeu")
+        assert text.startswith("🟡 *Mudança Controlada* detectada em migração de banco")
         assert "• `db/0007_backfill.sql` — `INSERT`: " in text
+        assert "migração de dados" in text
 
     def test_bare_value_in_a_procedure_call_does_not_reach_slack_either(self):
         findings = classify_sql("CALL migrate_subject(12345678900);")

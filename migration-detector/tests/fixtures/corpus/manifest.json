@@ -429,8 +429,8 @@
     },
     {
       "operation": "UPDATE",
-      "reason": "Statement não reconhecido pelo classificador: UPDATE freight_note SET carrier_name = :name WHERE carrier_code = :code — precisa de revisão manual.",
-      "severity": "unknown"
+      "reason": "Linhas de `freight_note` atualizadas — migração de dados, sem DDL. Confirmar o volume e o impacto com o time de dados.",
+      "severity": "controlled"
     }
   ],
   "doctrine/Migrations/mysql/Version20250101120200.php": [
@@ -500,13 +500,13 @@
   "doctrine/Migrations/pgsql/Version20250201120300.php": [
     {
       "operation": "INSERT",
-      "reason": "Statement não reconhecido pelo classificador: INSERT INTO stock.… — precisa de revisão manual.",
-      "severity": "unknown"
+      "reason": "Linhas inseridas em `stock.freight_note` — migração de dados, sem DDL. Confirmar o volume e o impacto com o time de dados.",
+      "severity": "controlled"
     },
     {
       "operation": "DELETE",
-      "reason": "Statement não reconhecido pelo classificador: DELETE FROM stock.… — precisa de revisão manual.",
-      "severity": "unknown"
+      "reason": "Linhas de `stock.freight_note` removidas — migração de dados, sem DDL. Confirmar o volume e o impacto com o time de dados.",
+      "severity": "controlled"
     }
   ],
   "doctrine/Migrations/pgsql/Version20250201120400.php": [
