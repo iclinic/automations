@@ -491,15 +491,20 @@ A action deve enviar um post no canal configurado contendo:
 - Breve descrição da mudança
 - Link do PR para detalhes
 
-Uma linha por operação classificada, nomeando o arquivo e a operação antes da
-razão. O arquivo e a operação estão ali por causa de `unknown`: "não entendi uma
-operação" só serve para quem lê se disser qual arquivo e qual operação. Operações
-`none` não viram linha.
+Uma linha por operação classificada, da mais grave para a mais branda. Cada
+linha abre com a severidade **dela**, no mesmo emoji e rótulo do cabeçalho, e
+depois nomeia o arquivo e a operação antes da razão. A severidade está ali porque
+o cabeçalho só dá a pior do PR, e um arquivo com um índice único e duas adições
+rende três linhas. O arquivo e a operação estão ali por causa de `unknown`: "não
+entendi uma operação" só serve para quem lê se disser qual arquivo e qual
+operação. Operações `none` não viram linha.
 
 ```text
 🔴 *Breaking Change* detectada em migração de banco
-*PR:* <https://github.com/org/repo/pull/123|#123 — Remove qty> por @fulano
-• `app/core/migrations/0042_drop_qty.py` — `RemoveField`: Campo `qty` removido de `order` — quem lê essa coluna quebra.
+*2 operação(ões) em 1 arquivo(s):* 1 breaking, 1 safe
+*PR:* <https://github.com/org/repo/pull/123|#123 — Troca qty por quantity> por @fulano
+• 🔴 *Breaking Change* · `app/core/migrations/0042_qty.py` — `RemoveField`: Campo `qty` removido de `order` — quem lê essa coluna quebra.
+• 🟢 *Safe Change* · `app/core/migrations/0042_qty.py` — `AddField`: Campo `quantity` adicionado em `order`.
 <https://github.com/org/repo/pull/123|Ver PR para detalhes>
 ```
 

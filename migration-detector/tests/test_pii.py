@@ -306,7 +306,7 @@ class TestNothingLeavesTheActionCarryingData:
             "42",
             "dev",
         )
-        assert "• `db/0042_backfill_subjects.sql` — `INSERT`: " in text
+        assert "• 🟡 *Mudança Controlada* · `db/0042_backfill_subjects.sql` — `INSERT`: " in text
         assert "migração de dados" in text
 
 
@@ -386,8 +386,7 @@ class TestTheRealPipelineCarriesNoData:
         paths = self._corpus(tmp_path)
         result = analyze(paths)
         text = build_slack_text(result, "http://pr", "Backfill", "42", "dev")
-        assert "• `" in text
-        assert any(p in text for p in paths)
+        assert any(f"· `{p}` — " in text for p in paths)
 
 
 # ---------------------------------------------------------------------------
