@@ -32,6 +32,12 @@ jobs:
 
 ```
 
+### Primeira análise e migração de organização no GitHub
+
+A chave do projeto no Sonar é `<organização>-<repositório>` (ou `<organização>-<application_name>`). Quando um repositório muda de organização, a chave muda e um projeto novo é criado no Sonar; o histórico fica no projeto da organização antiga, que deve ser removido manualmente depois da migração.
+
+Sempre que a branch principal do projeto ainda não tem análise (projeto novo ou recém-migrado) e o workflow roda em outra branch ou em PR, a action analisa a branch principal primeiro, uma única vez, como referência. Essa análise usa os mesmos `sonar_sources`, `sonar_exclusions`, `sonar_tests`, `sonar_test_inclusions`, `sonar_language` e `sonar_python_version` da análise real, não envia cobertura e não espera o Quality Gate. Se ela falhar, o step fica marcado com erro, mas o job segue com a análise normal. Se não for possível consultar o Sonar para saber se a branch principal já foi analisada, o job emite um warning e segue sem essa análise.
+
 ### Projetos Python - Configuração completa com coverage
 
 Projetos Python que usam coverage, precisam fazer as seguintes configurações:
@@ -94,4 +100,103 @@ jobs:
           sonar_python_coverage_reportpaths: 'coverage.xml'
           sonar_tests: 'tests'
           sonar_exclusions: '**/migrations/**,**/apps.py,**/admin.py,**/urls.py,**/*.html,**/healthcheck.py,**/wsgi.py,**/asgi.py'
+```
+
+### Projetos Javascript - Configuração completa com coverage no formato .lcov
+
+Projetos Javascript que usam coverage, precisam fazer as seguintes configurações:
+
+- O job do sonarqube precisa coletar o relatório no formato .lcov
+- O relatório é gerado após execução dos testes
+- Necessário configurar os testes para gerar o relatório no formato .lcov
+
+- Exemplo de configuração de cobertura c/ vitest:
+```js
+export default defineConfig(({ mode }) => {
+  return {
+    plugins: [react(), tsconfigPaths()],
+    test: {
+      environment: 'node',
+      globals: true,
+      include: ['*/**/*.test.ts'],
+      coverage: {
+        exclude: [
+          '**/middleware.ts',
+          '**/instrumentation.ts',
+        ],
+        include: [
+          'apps/webapp/src/**/*.ts',
+          'packages/**/src/**/*.ts',
+        ],
+        provider: 'istanbul',
+        reporter: 'lcovonly',
+      },
+    },
+  };
+});
+```
+- Exemplo completo:
+
+```yml
+on:
+  push:
+    branches: [main, master, production, staging]
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+  pull_request:
+    branches: [main, master, production, staging]
+  workflow_dispatch:
+
+jobs:
+  test-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-node
+
+      - name: Runtime tests
+        run: pnpm test:coverage
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/lcov.info
+          retention-days: 1
+
+  security:
+    needs: [test-unit]
+    runs-on: runner-security-${{ github.repository_owner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download coverage report
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage
+
+      - name: Get Previous tag
+        if: github.event_name == 'push'
+        id: previoustag
+        uses: WyriHaximus/github-action-get-previous-tag@8a0e045f02c0a3a04e1452df58b90fc7e555e950
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-node
+
+      - name: Run SonarQube
+        uses: iclinic/automations/security@v1
+        with:
+          sonar_token: ${{ secrets.SONAR_FOUNDATION_TOKEN }}
+          sonar_sources: 'apps/webapp,packages'
+          sonar_qualitygate_wait: true
+          sonar_test_inclusions: '**/*.test.ts,**/*.spec.ts'
+          sonar_coverage_exclusions: '**/app/**,**/env/**,**/hooks/**,**/actions/**,**/middleware.ts,**/instrumentation.ts'
+          sonar_javascript_coverage_lcov_reportpaths: lcov.info
+          project_version: ${{ github.event_name == 'push' && steps.previoustag.outputs.tag || '' }}
+
 ```
