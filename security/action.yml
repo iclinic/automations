@@ -41,6 +41,80 @@ inputs:
 runs:
   using: composite
   steps:
+    # Um projeto novo no Sonar (inclusive após migração de organização, que muda a chave) precisa
+    # ter a branch principal analisada antes de qualquer outra; senão a análise de PR falha e a
+    # main fica como "not analyzed yet". Checa se a branch principal já tem análise.
+    - name: check-main-branch-analysis
+      id: check-main
+      shell: bash
+      run: |
+        PROJECT_KEY="$COMPANY-$APPLICATION_NAME"
+        STATUS="$(curl -s -o /tmp/sonar-project-branches.json -w '%{http_code}' -u "$SONAR_TOKEN:" \
+          "${SONAR_HOST_URL%/}/api/project_branches/list?project=$PROJECT_KEY")"
+        if [ "$STATUS" = "404" ]; then
+          echo "Projeto '$PROJECT_KEY' ainda não existe no Sonar; a branch principal será analisada primeiro."
+          echo "needs-bootstrap=true" >> "$GITHUB_OUTPUT"
+        elif [ "$STATUS" = "200" ]; then
+          # A branch principal aparece na lista mesmo sem nunca ter sido analisada; o que importa é o analysisDate.
+          MAIN_ANALYZED="$(jq -r '[.branches[] | select(.isMain and .analysisDate != null)] | length' /tmp/sonar-project-branches.json)"
+          if [ "$MAIN_ANALYZED" = "0" ]; then
+            echo "Branch principal de '$PROJECT_KEY' ainda não foi analisada; ela será analisada primeiro."
+            echo "needs-bootstrap=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs-bootstrap=false" >> "$GITHUB_OUTPUT"
+          fi
+        else
+          echo "::warning::Não foi possível consultar as branches de '$PROJECT_KEY' no Sonar (HTTP $STATUS); análise da branch principal ignorada."
+          echo "needs-bootstrap=false" >> "$GITHUB_OUTPUT"
+        fi
+      env:
+        SONAR_HOST_URL: http://sonar.afya.tools:9000/
+        APPLICATION_NAME: ${{ github.event.repository.name }}
+        COMPANY: ${{ github.repository_owner }}
+        SONAR_TOKEN: ${{ inputs.sonar_token }}
+
+    # Roda uma vez por projeto: análise mínima da branch principal (sem cobertura e sem esperar o
+    # Quality Gate), num clone separado, com os mesmos sources/exclusões da análise real.
+    - name: bootstrap-main-branch-analysis
+      if: steps.check-main.outputs.needs-bootstrap == 'true' && github.event.repository.default_branch != '' && github.ref_name != github.event.repository.default_branch
+      continue-on-error: true
+      shell: bash
+      run: |
+        echo "::notice title=Primeira análise no SonarQube::Analisando a branch principal ('$DEFAULT_BRANCH') primeiro, como referência. Isso acontece só uma vez por projeto."
+        BOOTSTRAP_DIR="$(mktemp -d)"
+        trap 'rm -rf "$BOOTSTRAP_DIR"' EXIT
+        git clone --depth 1 --branch "$DEFAULT_BRANCH" \
+          "https://x-access-token:${GH_TOKEN}@${REPO_URL#https://}" "$BOOTSTRAP_DIR"
+
+        sonar-scanner \
+          -Dsonar.qualitygate.wait=false \
+          -Dsonar.projectKey="$COMPANY-$APPLICATION_NAME" \
+          -Dsonar.projectName="$COMPANY-$APPLICATION_NAME" \
+          -Dsonar.plugins.downloadOnlyRequired=true \
+          -Dsonar.token="$SONAR_TOKEN" \
+          -Dsonar.projectBaseDir="$BOOTSTRAP_DIR" \
+          -Dsonar.sources="$SONAR_SOURCES" \
+          -Dsonar.scm.provider=git \
+          -Dsonar.sourceEncoding=utf-8 \
+          -Dsonar.branch.name="$DEFAULT_BRANCH" \
+          ${SONAR_LANGUAGE:+-Dsonar.language="$SONAR_LANGUAGE"} \
+          ${SONAR_PYTHON_VERSION:+-Dsonar.python.version="$SONAR_PYTHON_VERSION"} \
+          ${SONAR_TESTS:+-Dsonar.tests="$SONAR_TESTS"} \
+          ${SONAR_EXCLUSIONS:+-Dsonar.exclusions="$SONAR_EXCLUSIONS"}
+      env:
+        SONAR_HOST_URL: http://sonar.afya.tools:9000/
+        APPLICATION_NAME: ${{ github.event.repository.name }}
+        COMPANY: ${{ github.repository_owner }}
+        SONAR_TOKEN: ${{ inputs.sonar_token }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+        GH_TOKEN: ${{ github.token }}
+        SONAR_SOURCES: ${{ inputs.sonar_sources }}
+        SONAR_LANGUAGE: ${{ inputs.sonar_language }}
+        SONAR_PYTHON_VERSION: ${{ inputs.sonar_python_version }}
+        SONAR_TESTS: ${{ inputs.sonar_tests }}
+        SONAR_EXCLUSIONS: ${{ inputs.sonar_exclusions }}
+
     - name: static-application-security-testing
       shell: bash
       run: sonar-scanner
