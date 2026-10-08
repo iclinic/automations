@@ -54,12 +54,15 @@ runs:
         if [ "$STATUS" = "404" ]; then
           echo "Projeto '$PROJECT_KEY' ainda não existe no Sonar; a branch principal será analisada primeiro."
           echo "needs-bootstrap=true" >> "$GITHUB_OUTPUT"
+          # Nome padrão do Sonar para a branch principal de um projeto novo.
+          echo "main-branch-name=main" >> "$GITHUB_OUTPUT"
         elif [ "$STATUS" = "200" ]; then
           # A branch principal aparece na lista mesmo sem nunca ter sido analisada; o que importa é o analysisDate.
           MAIN_ANALYZED="$(jq -r '[.branches[] | select(.isMain and .analysisDate != null)] | length' /tmp/sonar-project-branches.json)"
           if [ "$MAIN_ANALYZED" = "0" ]; then
             echo "Branch principal de '$PROJECT_KEY' ainda não foi analisada; ela será analisada primeiro."
             echo "needs-bootstrap=true" >> "$GITHUB_OUTPUT"
+            echo "main-branch-name=$(jq -r '[.branches[] | select(.isMain) | .name][0] // "main"' /tmp/sonar-project-branches.json)" >> "$GITHUB_OUTPUT"
           else
             echo "needs-bootstrap=false" >> "$GITHUB_OUTPUT"
           fi
@@ -75,12 +78,14 @@ runs:
 
     # Roda uma vez por projeto: análise mínima da branch principal (sem cobertura e sem esperar o
     # Quality Gate), num clone separado, com os mesmos sources/exclusões da análise real.
+    # O código é o da branch padrão do GitHub, mas é registrado com o nome da branch principal no
+    # Sonar (ex.: master analisada como main); senão a principal continuaria sem análise.
     - name: bootstrap-main-branch-analysis
       if: steps.check-main.outputs.needs-bootstrap == 'true' && github.event.repository.default_branch != '' && github.ref_name != github.event.repository.default_branch
       continue-on-error: true
       shell: bash
       run: |
-        echo "::notice title=Primeira análise no SonarQube::Analisando a branch principal ('$DEFAULT_BRANCH') primeiro, como referência. Isso acontece só uma vez por projeto."
+        echo "::notice title=Primeira análise no SonarQube::Analisando a branch '$DEFAULT_BRANCH' como branch principal ('$SONAR_MAIN_BRANCH') primeiro, como referência. Isso acontece só uma vez por projeto."
         BOOTSTRAP_DIR="$(mktemp -d)"
         trap 'rm -rf "$BOOTSTRAP_DIR"' EXIT
         git clone --depth 1 --branch "$DEFAULT_BRANCH" \
@@ -96,7 +101,7 @@ runs:
           -Dsonar.sources="$SONAR_SOURCES" \
           -Dsonar.scm.provider=git \
           -Dsonar.sourceEncoding=utf-8 \
-          -Dsonar.branch.name="$DEFAULT_BRANCH" \
+          -Dsonar.branch.name="$SONAR_MAIN_BRANCH" \
           ${SONAR_LANGUAGE:+-Dsonar.language="$SONAR_LANGUAGE"} \
           ${SONAR_PYTHON_VERSION:+-Dsonar.python.version="$SONAR_PYTHON_VERSION"} \
           ${SONAR_TESTS:+-Dsonar.tests="$SONAR_TESTS"} \
@@ -107,6 +112,7 @@ runs:
         COMPANY: ${{ github.repository_owner }}
         SONAR_TOKEN: ${{ inputs.sonar_token }}
         DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        SONAR_MAIN_BRANCH: ${{ steps.check-main.outputs.main-branch-name }}
         REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
         GH_TOKEN: ${{ github.token }}
         SONAR_SOURCES: ${{ inputs.sonar_sources }}
