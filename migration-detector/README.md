@@ -400,9 +400,13 @@ responde silêncio quando não sabe decidir. Saem como `unknown`:
   alguém o considera migração;
 - arquivo cujo parser foi escolhido e voltou vazio embora o arquivo declare
   operações. É o caso do South, que traz `class Migration` — casando o marcador
-  do Django — mas guarda as operações em `def forwards`; e o da migração do
-  Doctrine escrita com o schema builder (`$schema->createTable(...)`) em vez de
-  `$this->addSql()`, que o parser não lê.
+  do Django — mas guarda as operações em `def forwards`.
+
+A migração do Doctrine escrita com o schema builder (`$schema->createTable(...)`)
+ou pela conexão (`$this->connection->executeStatement(...)`) não depende desse
+portão: o parser devolve `unknown` para cada chamada de `up()` que não é
+`addSql` nem leitura, com o nome do método no lugar da operação. Assim um
+`dropTable` ao lado de um `addSql` seguro continua aparecendo.
 
 O que separa "não é uma migração" de "é uma migração que eu não sei ler" é
 declarar operações, e em todo dialeto uma operação é uma **chamada**. Um

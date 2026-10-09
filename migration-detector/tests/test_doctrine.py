@@ -529,6 +529,74 @@ class TestSqlThatIsNotALiteral:
 
 
 # ---------------------------------------------------------------------------
+# Chamadas de up() que não passam por addSql
+# ---------------------------------------------------------------------------
+
+
+class TestCallsOutsideAddSql:
+    """O `up()` que mistura `addSql` com outra API do Doctrine.
+
+    O portão do parser mudo em `detect/__init__.py` só dispara quando o parser
+    volta de mãos vazias. Um `addSql` seguro ao lado de um `$schema->dropTable()`
+    devolvia o finding seguro, o portão não disparava, e o `DROP TABLE` saía da
+    mensagem sem deixar rastro.
+    """
+
+    def test_a_schema_builder_call_next_to_add_sql_is_unknown(self):
+        source = migration(f"{add_sql(ADD_COLUMN)}\n$schema->dropTable('freight_note');")
+        findings = classify_migration(source)
+        assert [f.operation for f in findings] == ["ADD COLUMN", "dropTable"]
+        assert findings[1].severity is Severity.UNKNOWN
+        assert findings[1].reason == _GATES["unread_call"].reason
+
+    def test_a_statement_run_on_the_connection_is_unknown(self):
+        source = migration(
+            f"{add_sql(ADD_COLUMN)}\n"
+            "$this->connection->executeStatement('DROP TABLE freight_note');"
+        )
+        assert severities(source) == [Severity.SAFE, Severity.UNKNOWN]
+
+    def test_a_chained_builder_call_names_the_call_that_mutates(self):
+        source = migration("$schema->getTable('freight_note')->dropColumn('settled');")
+        finding = only(source)
+        assert finding.operation == "dropColumn"
+        assert finding.severity is Severity.UNKNOWN
+
+    def test_add_sql_is_read_in_any_case_like_php_reads_it(self):
+        # Nome de método em PHP não diferencia maiúscula de minúscula: `addSQL`
+        # chama o mesmo `addSql`, e o SQL dele roda igual.
+        finding = only(migration(f"$this->addSQL('{DROP_COLUMN}');"))
+        assert finding.severity is Severity.BREAKING
+        assert finding.operation == "DROP COLUMN"
+
+    @pytest.mark.parametrize(
+        "guard",
+        [
+            "if ($schema->hasTable('freight_note')) {\n    $this->write('ok');\n}",
+            "$this->abortIf(\n"
+            "    $this->connection->getDatabasePlatform()->getName() !== 'mysql',\n"
+            "    'Migration can only be executed safely on mysql.'\n"
+            ");",
+            "$this->skipIf($schema->hasTable('freight_note'), 'ja existe');",
+            "$this->warnIf($this->connection->fetchOne('SELECT 1') === false, 'vazio');",
+        ],
+    )
+    def test_a_call_that_only_reads_is_not_a_finding(self, guard):
+        source = migration(f"{guard}\n{add_sql(ADD_COLUMN)}")
+        assert [f.operation for f in classify_migration(source)] == ["ADD COLUMN"]
+
+    def test_a_call_inside_the_add_sql_argument_is_not_counted_twice(self):
+        # O argumento já sai como SQL dinâmico; a chamada que o monta é o mesmo
+        # problema, e não um segundo.
+        finding = only(migration("$this->addSql($this->buildStatement());"))
+        assert finding.reason == _GATES["dynamic_sql"].reason
+
+    def test_a_call_in_down_is_still_ignored(self):
+        source = migration(add_sql(ADD_COLUMN), down="$schema->dropTable('freight_note');")
+        assert [f.operation for f in classify_migration(source)] == ["ADD COLUMN"]
+
+
+# ---------------------------------------------------------------------------
 # O segundo argumento: os parâmetros nomeados
 # ---------------------------------------------------------------------------
 
@@ -741,6 +809,7 @@ GATE_SOURCES = {
     "dynamic_sql": migration("$this->addSql($sql);"),
     "interpolating_sql": migration(f'$this->addSql("{DROP_COLUMN}");'),
     "empty_sql": migration("$this->addSql();"),
+    "unread_call": migration("$schema->dropTable('freight_note');"),
     "ambiguous_up": (
         f"{HEAD}\nclass A extends AbstractMigration\n{{\n"
         "    public function up(Schema $schema): void\n    {\n    }\n}\n"

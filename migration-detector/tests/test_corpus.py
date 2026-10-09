@@ -171,8 +171,7 @@ RESIDUE: dict[str, str] = {
     "doctrine/Migrations/pgsql/Version20250201120700.php":
         "corpo de up() que não fecha",
     "doctrine/Migrations/pgsql/Version20250201120800.php":
-        "migração escrita com o schema builder — parser certo, zero findings, "
-        "e o arquivo declara operações",
+        "migração escrita com o schema builder — chamadas fora de addSql()",
     # --- os `unknown` que o próprio dispatch produz ------------------------
     "dispatch/activerecord_style_migration.rb":
         "extensão sem classificador",
@@ -675,7 +674,7 @@ class TestTheCorpusReachesEveryTypeormGate:
 
 
 class TestTheCorpusReachesEveryDoctrineGate:
-    """Os cinco portões do `doctrine.py`, alcançados por arquivo em disco.
+    """Os seis portões do `doctrine.py`, alcançados por arquivo em disco.
 
     `tests/test_doctrine.py` já exercita cada portão com fonte escrita à mão. O
     que esta classe acrescenta é a mesma exigência do outro lado: a linha tem que
@@ -711,19 +710,14 @@ class TestTheCorpusReachesEveryDispatchReason:
                 "dispatch/south_style_migration.py",
                 detect.SILENT_PARSER.format(stack="django"),
             ),
-            # As duas do stack novo. A primeira é o gerador de migrações, que
-            # traz o marcador do Doctrine escrito dentro de um heredoc: o
-            # marcador roda sobre o texto apagado, então ele não casa, e a
-            # resposta é a de dialeto que o pacote não conhece. A segunda é a
-            # migração escrita com o schema builder — parser certo, zero
-            # findings, e o arquivo declara operações.
+            # A do stack novo: o gerador de migrações, que traz o marcador do
+            # Doctrine escrito dentro de um heredoc. O marcador roda sobre o
+            # texto apagado, então ele não casa, e a resposta é a de dialeto que
+            # o pacote não conhece. A migração escrita com o schema builder não
+            # passa mais por aqui: o `doctrine.py` responde por ela sozinho.
             (
                 "dispatch/doctrine_generator.php",
                 detect.UNRECOGNISED.format(stacks="doctrine"),
-            ),
-            (
-                "doctrine/Migrations/pgsql/Version20250201120800.php",
-                detect.SILENT_PARSER.format(stack="doctrine"),
             ),
         ],
     )

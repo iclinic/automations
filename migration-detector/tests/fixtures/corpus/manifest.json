@@ -544,8 +544,18 @@
   ],
   "doctrine/Migrations/pgsql/Version20250201120800.php": [
     {
-      "operation": "Arquivo",
-      "reason": "O arquivo declara operações que o classificador de doctrine não leu — precisa de revisão manual.",
+      "operation": "createTable",
+      "reason": "Chamada fora de `addSql()` no `up()` — o classificador não lê o que ela faz no banco, precisa de revisão manual.",
+      "severity": "unknown"
+    },
+    {
+      "operation": "addColumn",
+      "reason": "Chamada fora de `addSql()` no `up()` — o classificador não lê o que ela faz no banco, precisa de revisão manual.",
+      "severity": "unknown"
+    },
+    {
+      "operation": "setPrimaryKey",
+      "reason": "Chamada fora de `addSql()` no `up()` — o classificador não lê o que ela faz no banco, precisa de revisão manual.",
       "severity": "unknown"
     }
   ],

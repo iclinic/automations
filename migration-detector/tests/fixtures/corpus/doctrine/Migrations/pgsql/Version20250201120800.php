@@ -5,12 +5,11 @@
  * ---------------------------
  *
  * A migração escrita com o **schema builder** do Doctrine em vez de `addSql()`.
- * Este parser só lê `addSql`, então devolve lista vazia — e lista vazia se lê,
- * a jusante, como "nada a reportar". O portão do parser mudo em
- * `detect/__init__.py` é quem transforma isso em `unknown`: o parser certo foi
- * escolhido, voltou de mãos vazias, e o arquivo declara operações.
- *
- * É o mesmo caso do South no dispatch do Django, agora no stack do Doctrine.
+ * O parser só lê o SQL de `addSql`, e cada outra chamada de `up()` que não é
+ * leitura sai `unknown` com o nome do método: `createTable`, `addColumn`,
+ * `setPrimaryKey`. Antes ele devolvia lista vazia e quem respondia era o portão
+ * do parser mudo em `detect/__init__.py` — que não dispara quando há um
+ * `addSql` ao lado, e era por aí que um `dropTable` sumia da mensagem.
  */
 
 declare(strict_types=1);

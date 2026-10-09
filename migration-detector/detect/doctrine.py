@@ -38,8 +38,10 @@ termina, e então casa a chave que abre o corpo de `up()` com a que o fecha no
 texto apagado, lendo o SQL no texto original. Não é um parser de PHP e o aceite
 é explícito em não pedir um.
 
-Dentro do corpo de `up()`, a unidade é a chamada `->addSql()`. O SQL sai dela
-quando o primeiro argumento é um literal inteiro; todo o resto é `unknown`.
+Dentro do corpo de `up()`, a unidade é a chamada de método. De `->addSql()` —
+em qualquer caixa, como o PHP lê o nome — sai o SQL, quando o primeiro argumento
+é um literal inteiro; todo o resto é `unknown`. Qualquer outra chamada que não
+seja leitura também é `unknown`, com o nome do método como operação.
 `down()` fica de fora por construção: o que roda no deploy é o `up()`, e
 classificar o rollback pintaria de vermelho toda migração que sabe se desfazer.
 
@@ -81,10 +83,14 @@ Onde o scanner tem teto, e o teto é conhecido
 ---------------------------------------------
 
 - **SQL que não passa por `->addSql()`** — `$this->connection->executeStatement($sql)`,
-  o schema builder do Doctrine (`$schema->createTable(...)`) — não é lido, e o
-  arquivo sai sem finding nenhum. O portão do dispatch em `detect/__init__.py`
-  transforma isso em `unknown`, porque o arquivo declara operações e o parser
-  certo não leu nenhuma. Nenhum arquivo do corpus faz isso.
+  o schema builder do Doctrine (`$schema->createTable(...)`) — não é lido. Cada
+  chamada dessas sai `unknown`, e não só quando o arquivo não tem `addSql`
+  nenhum: o portão do parser mudo em `detect/__init__.py` não dispara se há um
+  finding ao lado, e um `dropTable` junto de um `addSql` seguro sumiria. O que
+  passa sem finding é a leitura (`get*`, `has*`, `is*`, `fetch*`) e as guardas
+  do `AbstractMigration` (`write`, `warnIf`, `abortIf`, `skipIf`). Chamada
+  estática (`Foo::bar()`) e função solta não são lidas. Nenhum arquivo do corpus
+  real chama outra coisa além de `$this->addSql()`.
 - **`up` definido mais de uma vez** no arquivo devolve `unknown`: sem escopo não
   dá para dizer qual deles o Doctrine chama.
 - **Tipo de retorno escrito com chave** (`up($s): array{a: int} {`) faria a
@@ -422,6 +428,17 @@ _EMPTY_SQL = _Gate(
     "Chamada `addSql()` sem SQL a executar — não altera schema.",
 )
 
+# Uma chamada de `up()` que não é `addSql` nem leitura: o schema builder
+# (`$schema->dropTable()`), a conexão (`->executeStatement()`). O `operation` do
+# finding é o nome do método, e não o desta linha — é ele que diz ao time o que
+# olhar.
+_UNREAD_CALL = _Gate(
+    Severity.UNKNOWN,
+    "chamada",
+    "Chamada fora de `addSql()` no `up()` — o classificador não lê o que ela faz no "
+    "banco, " + MANUAL,
+)
+
 _AMBIGUOUS_UP = _Gate(
     Severity.UNKNOWN,
     "up",
@@ -440,6 +457,7 @@ _GATES: dict[str, _Gate] = {
     "dynamic_sql": _DYNAMIC_SQL,
     "interpolating_sql": _INTERPOLATING_SQL,
     "empty_sql": _EMPTY_SQL,
+    "unread_call": _UNREAD_CALL,
     "ambiguous_up": _AMBIGUOUS_UP,
     "unterminated_up": _UNTERMINATED_UP,
 }
@@ -554,9 +572,24 @@ def _up_body(masked: str) -> tuple[tuple[int, int] | None, _Gate | None]:
 # Statements do corpo
 # ---------------------------------------------------------------------------
 
-# `->addSql(`. O `->` é o que separa a chamada da definição de um método com o
+# `->metodo(`. O `->` é o que separa a chamada da definição de um método com o
 # mesmo nome, e é como o Doctrine escreve: `$this->addSql(...)`.
-_ADD_SQL_CALL = re.compile(r"->\s*addSql\s*\(")
+_METHOD_CALL = re.compile(r"->\s*(?P<name>[A-Za-z_]\w*)\s*\(")
+
+# Nome de método em PHP não diferencia caixa: `addSQL` é o mesmo `addSql`.
+_ADD_SQL = "addsql"
+
+# Chamadas de `up()` que não mexem no banco e não viram finding. As do
+# `AbstractMigration` que só falam ou interrompem, e as de leitura pelo prefixo
+# do nome — `$schema->hasTable()` de guarda, a plataforma no `abortIf` que o
+# Doctrine gera. A lista é do que se deixa passar, e não do que se denuncia: o
+# método que ninguém previu sai `unknown`, que é o lado barulhento do erro.
+_GUARDS = frozenset({"write", "warnif", "abortif", "skipif"})
+_READER = re.compile(r"(?:get|has|is|fetch)(?=[A-Z_]|$)")
+
+
+def _only_reads(name: str) -> bool:
+    return name.lower() in _GUARDS or _READER.match(name) is not None
 
 
 def _is_whole_argument(masked: str, literal: _Literal) -> bool:
@@ -624,8 +657,16 @@ def classify_migration(source: str) -> list[Finding]:
 
     start, end = body
     by_start = {literal.start: literal for literal in literals}
-    return [
-        finding
-        for call in _ADD_SQL_CALL.finditer(masked, start, end)
-        for finding in _argument_findings(masked, by_start, call.end())
-    ]
+    findings: list[Finding] = []
+    inside_add_sql = start
+    for call in _METHOD_CALL.finditer(masked, start, end):
+        name = call.group("name")
+        if call.start() < inside_add_sql:
+            # Chamada dentro do argumento de um `addSql`, que já saiu dinâmico.
+            continue
+        if name.lower() == _ADD_SQL:
+            findings.extend(_argument_findings(masked, by_start, call.end()))
+            inside_add_sql = _closing_paren(masked, call.end() - 1) or end
+        elif not _only_reads(name):
+            findings.append(Finding(_UNREAD_CALL.severity, name, _UNREAD_CALL.reason))
+    return findings
