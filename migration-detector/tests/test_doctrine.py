@@ -1,8 +1,8 @@
 """Testes do parser de migrações do Doctrine Migrations, em PHP.
 
-As migrações usadas aqui foram derivadas do corpus real do consumidor: 18
+As migrações usadas aqui foram derivadas do corpus real do consumidor: 19
 arquivos, divididos em **dois diretórios, um por banco** — 7 no MySQL, que
-guarda o financeiro do SaaS, e 11 no PostgreSQL, que guarda o resto do sistema.
+guarda o financeiro do SaaS, e 12 no PostgreSQL, que guarda o resto do sistema.
 Nenhum arquivo do corpus é copiado para cá: `iclinic/automations` é público, e a
 suíte de fixtures é da QQ-2161.
 
