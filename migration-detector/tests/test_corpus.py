@@ -55,7 +55,7 @@ from pathlib import Path
 import pytest
 
 import detect
-from detect import alembic, django, history, sql, typeorm
+from detect import alembic, django, doctrine, history, sql, typeorm
 from detect.severity import Severity
 
 CORPUS = Path(__file__).parent / "fixtures" / "corpus"
@@ -156,6 +156,22 @@ RESIDUE: dict[str, str] = {
         "verbo fora da tabela de statements",
     "sql/0009_alter_column_action_unrecognised.sql":
         "ação de ALTER COLUMN fora da tabela",
+    # --- o resíduo do Doctrine, nas duas bases ----------------------------
+    #
+    # A migração de dados com parâmetros nomeados, que é metade do corpus real
+    # deste consumidor, não está aqui: `INSERT`, `UPDATE` e `DELETE` têm linha
+    # `controlled` na tabela de statements do `sql.py`. O que sobra é SQL que o
+    # arquivo não escreve por inteiro.
+    "doctrine/Migrations/mysql/Version20250101120400.php":
+        "heredoc interpolado — o SQL que roda pode não ser o que está escrito",
+    "doctrine/Migrations/mysql/Version20250101120500.php":
+        "SQL montado por concatenação",
+    "doctrine/Migrations/pgsql/Version20250201120600.php":
+        "duas definições de up(), em duas classes do mesmo arquivo",
+    "doctrine/Migrations/pgsql/Version20250201120700.php":
+        "corpo de up() que não fecha",
+    "doctrine/Migrations/pgsql/Version20250201120800.php":
+        "migração escrita com o schema builder — chamadas fora de addSql()",
     # --- os `unknown` que o próprio dispatch produz ------------------------
     "dispatch/activerecord_style_migration.rb":
         "extensão sem classificador",
@@ -167,6 +183,9 @@ RESIDUE: dict[str, str] = {
         "parser certo, zero findings, e o arquivo declara operações",
     "dispatch/yoyo_style_migration.py":
         "dialeto de migração que o pacote não conhece",
+    "dispatch/doctrine_generator.php":
+        "o gerador que escreve migrações, e que traz o marcador do Doctrine "
+        "escrito por extenso dentro de um heredoc",
 }
 
 
@@ -195,11 +214,38 @@ REAL_CORPUS = {
         # RENAME` que o classificador não decide. Ver `REAL_TYPEORM_STATEMENTS`.
         "unknown_files": 2,
     },
+    "doctrine": {
+        # O `*` do meio é o diretório do banco, e é ele que faz as **duas** bases
+        # entrarem na medição — a do financeiro e a do resto do sistema. O `2`
+        # depois de `Version` deixa fora o `VersionHelper.php` do runner, que não
+        # é migração; é o mesmo recorte do glob de `migration_paths`.
+        "glob": "Migrations/*/Version2*.php",
+        "files": 19,
+        # Eram 10 de 18 enquanto `INSERT`, `UPDATE` e `DELETE` ficavam fora da
+        # tabela de statements do `sql.py`: metade das migrações deste consumidor
+        # é migração de dados em SQL cru. Com o DML valendo `controlled`, como o
+        # `RunPython` de dados do Django, nenhum arquivo sobra sem decisão.
+        "unknown_files": 0,
+    },
 }
 
 # `typeorm.py` devolve um finding por statement, então a medição do repositório
 # de vídeo tem um segundo número que os outros dois não têm.
 REAL_TYPEORM_STATEMENTS = {"total": 133, "unknown": 2}
+
+# `doctrine.py` também devolve um finding por statement, e a medição dele tem um
+# terceiro número que nenhum outro stack tem: a quebra por **banco**. O cartão da
+# SHS-606 existe por causa dela — um alerta que cobrisse só o PostgreSQL deixaria
+# a base do financeiro sem proteção —, então a contagem por diretório de banco é
+# afirmada e não deduzida.
+REAL_DOCTRINE = {
+    "statements": {"total": 38, "unknown": 0},
+    # Os verbos de DML que o corpus real usa, todos com linha própria na tabela.
+    # Igualdade, e não contenção: um verbo de dados novo no consumidor muda o
+    # conjunto e pede que alguém confira a severidade dele.
+    "data_operations": {"INSERT", "UPDATE", "DELETE"},
+    "databases": {"mysql": 7, "pgsql": 12},
+}
 
 
 # ---------------------------------------------------------------------------
@@ -574,6 +620,9 @@ STATEMENT_ROWS: dict[str, tuple[str, Severity]] = {
     r"CREATE\s+(?:TEMP(?:ORARY)?\s+)?TABLE\b":   ("CREATE TABLE",    Severity.SAFE),
     r"DROP\s+TABLE\b":                           ("DROP TABLE",      Severity.BREAKING),
     r"TRUNCATE\b":                               ("TRUNCATE",        Severity.BREAKING),
+    r"INSERT\b":                                 ("INSERT",          Severity.CONTROLLED),
+    r"UPDATE\b":                                 ("UPDATE",          Severity.CONTROLLED),
+    r"DELETE\b":                                 ("DELETE",          Severity.CONTROLLED),
     r"CREATE\s+(?:UNIQUE\s+)?INDEX\b":           ("CREATE INDEX",    Severity.SAFE),
     r"DROP\s+INDEX\b":                           ("DROP INDEX",      Severity.CONTROLLED),
     r"CREATE\s+TYPE\b":                          ("CREATE TYPE",     Severity.SAFE),
@@ -624,6 +673,23 @@ class TestTheCorpusReachesEveryTypeormGate:
         assert gate.reason in reasons, name
 
 
+class TestTheCorpusReachesEveryDoctrineGate:
+    """Os seis portões do `doctrine.py`, alcançados por arquivo em disco.
+
+    `tests/test_doctrine.py` já exercita cada portão com fonte escrita à mão. O
+    que esta classe acrescenta é a mesma exigência do outro lado: a linha tem que
+    ser alcançada **através do dispatch, por um arquivo versionado** — é assim
+    que a QQ-2161 achou `add_key` e `drop_key` sem nenhuma afirmação de
+    severidade na suíte.
+    """
+
+    @pytest.mark.parametrize("name", sorted(doctrine._GATES))
+    def test_the_gate_fires_on_some_fixture(self, name):
+        gate = doctrine._GATES[name]
+        reasons = [f.reason for f in corpus_findings()]
+        assert gate.reason in reasons, name
+
+
 class TestTheCorpusReachesEveryDispatchReason:
     """As cinco razões que o próprio dispatch produz, cada uma por um arquivo."""
 
@@ -643,6 +709,15 @@ class TestTheCorpusReachesEveryDispatchReason:
             (
                 "dispatch/south_style_migration.py",
                 detect.SILENT_PARSER.format(stack="django"),
+            ),
+            # A do stack novo: o gerador de migrações, que traz o marcador do
+            # Doctrine escrito dentro de um heredoc. O marcador roda sobre o
+            # texto apagado, então ele não casa, e a resposta é a de dialeto que
+            # o pacote não conhece. A migração escrita com o schema builder não
+            # passa mais por aqui: o `doctrine.py` responde por ela sozinho.
+            (
+                "dispatch/doctrine_generator.php",
+                detect.UNRECOGNISED.format(stacks="doctrine"),
             ),
         ],
     )
@@ -790,6 +865,64 @@ class TestTheRealCorpus:
         assert len(findings) >= REAL_TYPEORM_STATEMENTS["total"]
         assert len(unknown) <= REAL_TYPEORM_STATEMENTS["unknown"]
         assert {f.operation for f in unknown} == {"ALTER TYPE"}
+
+    def test_the_doctrine_statements_did_not_lose_coverage(self):
+        """O segundo número do consumidor Doctrine: statements, não arquivos.
+
+        O total é piso, pelo mesmo motivo do TypeORM: o consumidor cresce, e um
+        `==` ficaria vermelho a cada migração nova sem nenhuma classificação ter
+        mudado. Quem guarda a qualidade é o teto do `unknown`.
+        """
+        files = _real_files("doctrine")
+        if not files:
+            pytest.skip(_why_it_skipped("doctrine"))
+        findings = [f for p in files for f in detect.classify_file(p)]
+        unknown = [f for f in findings if f.severity is Severity.UNKNOWN]
+        assert len(findings) >= REAL_DOCTRINE["statements"]["total"]
+        assert len(unknown) <= REAL_DOCTRINE["statements"]["unknown"], [
+            f.operation for f in unknown
+        ]
+
+    def test_every_doctrine_data_statement_is_controlled(self):
+        """Metade do consumidor é migração de dados, e ela sai `controlled`.
+
+        É a mesma severidade do `RunPython` de dados do Django. O `DELETE` sem
+        `WHERE` seria `breaking`, como o `TRUNCATE`; o corpus real não tem
+        nenhum, e um que entrasse derrubaria este teste para alguém olhar.
+        """
+        files = _real_files("doctrine")
+        if not files:
+            pytest.skip(_why_it_skipped("doctrine"))
+        data = [
+            f
+            for p in files
+            for f in detect.classify_file(p)
+            if f.operation in REAL_DOCTRINE["data_operations"]
+        ]
+        assert data  # senão o conjunto abaixo é vazio e não afirma nada
+        assert {f.operation for f in data} == REAL_DOCTRINE["data_operations"]
+        assert {f.severity for f in data} == {Severity.CONTROLLED}
+
+    def test_both_databases_of_the_doctrine_consumer_are_in_the_flow(self):
+        """O motivo de existir do cartão, medido.
+
+        As migrações do consumidor moram em um diretório por banco, e um glob que
+        alcançasse só um deles deixaria o outro sem alerta nenhum — o silêncio
+        que esta action existe para acabar. O teste conta por diretório e exige
+        que os dois tenham arquivo **classificado**, não só coletado.
+        """
+        files = _real_files("doctrine")
+        if not files:
+            pytest.skip(_why_it_skipped("doctrine"))
+        by_database: dict[str, int] = {}
+        for path in files:
+            assert detect.stack_for(path, detect.read_source(path)) == "doctrine", path
+            by_database[path.parent.name] = by_database.get(path.parent.name, 0) + 1
+        # As bases são igualdade; a contagem de cada uma é piso, porque as duas
+        # recebem migração nova.
+        assert set(by_database) == set(REAL_DOCTRINE["databases"])
+        for database, floor in REAL_DOCTRINE["databases"].items():
+            assert by_database[database] >= floor, database
 
     def test_the_adr_fixtures_say_what_the_real_files_say(self):
         """As fixturas da ADR reproduzem o veredito dos arquivos reais.

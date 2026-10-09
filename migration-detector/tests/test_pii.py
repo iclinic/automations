@@ -22,7 +22,7 @@ import pytest
 
 from build_slack_payload import build_payload
 from classify import analyze, build_slack_text, write_github_outputs
-from detect import alembic, classify_file, django, sql, typeorm
+from detect import alembic, classify_file, django, doctrine, sql, typeorm
 from detect.severity import max_severity
 
 # ---------------------------------------------------------------------------
@@ -90,6 +90,46 @@ TYPEORM_MIGRATION = f'''export class BackfillSubjects1700000000000 implements Mi
 }}
 '''
 
+# O consumidor Doctrine tem duas bases e metade do corpus dele é migração de
+# dados, então esta é a stack onde o dado passa pelo parser com mais frequência,
+# não com menos. O dado está plantado nas três posições que o `addSql()` oferece:
+# dentro do literal de aspa simples, dentro de um nowdoc — a forma multilinha,
+# que é como o corpus real escreve bloco grande — e no **array de parâmetros**,
+# que o parser não pode ler de jeito nenhum.
+#
+# `DOUBLE_QUOTED_INSERT` é o caso que achou o quarto vazamento desta família:
+# `"..."` delimita identificador no PostgreSQL e **string** no MySQL, e o corte
+# de `_echo` só olhava a aspa simples. O consumidor Doctrine é o primeiro com uma
+# base MySQL cheia de migração de dados.
+DOUBLE_QUOTED_INSERT = f'''INSERT INTO subjects (cpf, name) VALUES ("{CPF}", "{SUBJECT_NAME}");'''
+
+DOCTRINE_MIGRATION = f'''<?php
+
+namespace Migrations;
+
+use Doctrine\\Migrations\\AbstractMigration;
+
+final class Version20260101120000 extends AbstractMigration
+{{
+    public function up(Schema $schema): void
+    {{
+        $this->addSql('{BARE_CALL}');
+
+        $this->addSql(<<<'SQL'
+{DOUBLE_QUOTED_INSERT}
+SQL);
+
+        $this->addSql(
+            'UPDATE subjects SET name = :name WHERE cpf = :cpf',
+            [
+                'name' => '{SUBJECT_NAME}',
+                'cpf' => '{CPF}',
+            ]
+        );
+    }}
+}}
+'''
+
 
 def _sql_findings():
     return [finding for source in SQL_CORPUS for finding in sql.classify_sql(source)]
@@ -104,6 +144,9 @@ _DISPATCH_CORPUS = (
     ("0002_backfill.py", f"class Migration(  ::: {INSERT}"),
     ("0003_backfill.py", f'class Migration: pass\ndef upgrade(): pass\n# {INSERT}'),
     ("0004_backfill.sql", COPY_BLOCK),
+    # `.php` sem o marcador do Doctrine: casou o glob, não é migração deste
+    # pacote, e a razão do `unknown` não pode interpolar o conteúdo.
+    ("0005_backfill.php", f"<?php\nclass Backfill {{ public function run() {{ /* {INSERT} */ }} }}\n"),
 )
 
 
@@ -125,6 +168,7 @@ PARSERS = {
     "django": lambda tmp_path: django.classify_migration(DJANGO_MIGRATION),
     "alembic": lambda tmp_path: alembic.classify_migration(ALEMBIC_MIGRATION),
     "typeorm": lambda tmp_path: typeorm.classify_migration(TYPEORM_MIGRATION),
+    "doctrine": lambda tmp_path: doctrine.classify_migration(DOCTRINE_MIGRATION),
     "dispatch": _dispatch_findings,
 }
 
@@ -262,8 +306,8 @@ class TestNothingLeavesTheActionCarryingData:
             "42",
             "dev",
         )
-        assert "• `db/0042_backfill_subjects.sql` — `INSERT`: " in text
-        assert "precisa de revisão manual." in text
+        assert "• 🟡 *Mudança Controlada* · `db/0042_backfill_subjects.sql` — `INSERT`: " in text
+        assert "migração de dados" in text
 
 
 # ---------------------------------------------------------------------------
@@ -285,7 +329,8 @@ class TestTheRealPipelineCarriesNoData:
             ("0002_backfill.py", DJANGO_MIGRATION),
             ("0003_backfill.py", ALEMBIC_MIGRATION),
             ("0004_backfill.ts", TYPEORM_MIGRATION),
-            ("0005_backfill.rb", INSERT),
+            ("0005_backfill.php", DOCTRINE_MIGRATION),
+            ("0006_backfill.rb", INSERT),
         ]
         paths = []
         for name, source in files:
@@ -341,8 +386,7 @@ class TestTheRealPipelineCarriesNoData:
         paths = self._corpus(tmp_path)
         result = analyze(paths)
         text = build_slack_text(result, "http://pr", "Backfill", "42", "dev")
-        assert "• `" in text
-        assert any(p in text for p in paths)
+        assert any(f"· `{p}` — " in text for p in paths)
 
 
 # ---------------------------------------------------------------------------
@@ -486,6 +530,11 @@ _REAL_GLOBS = {
     "django": "django/app/*/migrations/*.py",
     "alembic": "**/versions/*.py",
     "typeorm": "migrations/*.ts",
+    # O `*` do meio é o diretório do banco: o consumidor Doctrine tem dois, e o
+    # vocabulário dos dois entra na varredura. Um glob que cobrisse só um deles
+    # deixaria metade do schema real fora da comparação, e uma fixture que
+    # copiasse um nome de lá passaria batido.
+    "doctrine": "Migrations/*/Version2*.php",
 }
 
 # Palavra que colide por ser comum, não por identificar estes serviços.

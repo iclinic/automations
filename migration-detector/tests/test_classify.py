@@ -249,7 +249,7 @@ class TestBuildSlackText:
         # Fragmento renderizado, e não dois `in` soltos: trocar arquivo por
         # operação na linha continuaria satisfazendo duas asserções separadas.
         assert (
-            "• `app/migrations/0042_auto.py` — `RunPython`: "
+            "• 🟠 *Não classificado* · `app/migrations/0042_auto.py` — `RunPython`: "
             "Operação `RunPython` fora da tabela do classificador — precisa de revisão manual."
         ) in text
 
@@ -259,7 +259,7 @@ class TestBuildSlackText:
             "items": [{"severity": "unknown", "reason": "Não deu para ler."}],
         }
         text = build_slack_text(result, "http://pr", "Title", "1", "author")
-        assert "• (nome não identificado) — (nome não identificado): Não deu para ler." in text
+        assert "• 🟠 *Não classificado* · (nome não identificado) — (nome não identificado): Não deu para ler." in text
         assert "``" not in text
 
     def test_contains_pr_number_and_url(self):
@@ -284,7 +284,7 @@ class TestBuildSlackText:
             ],
         }
         text = build_slack_text(result, "http://pr", "Title", "1", "author")
-        assert "• `db/0003_drop.sql` — `DROP COLUMN`: Remoção do campo x" in text
+        assert "• 🔴 *Breaking Change* · `db/0003_drop.sql` — `DROP COLUMN`: Remoção do campo x" in text
 
     def test_one_line_per_item(self):
         result = {
@@ -297,8 +297,47 @@ class TestBuildSlackText:
             ],
         }
         text = build_slack_text(result, "http://pr", "Title", "1", "author")
-        assert "• `a.sql` — `DROP COLUMN`: Primeira." in text
-        assert "• `b.sql` — `ADD COLUMN`: Segunda." in text
+        assert "• 🔴 *Breaking Change* · `a.sql` — `DROP COLUMN`: Primeira." in text
+        assert "• 🟢 *Safe Change* · `b.sql` — `ADD COLUMN`: Segunda." in text
+
+    def test_each_line_says_its_own_severity(self):
+        # O alerta que motivou isto: um índice único e duas adições no mesmo
+        # arquivo, e o cabeçalho dizendo "1 breaking, 2 safe" sem dizer qual
+        # linha era a breaking.
+        result = {
+            "highest_severity": "breaking",
+            "items": [
+                {"file": "0052_key.py", "severity": "safe", "operation": "ADD COLUMN",
+                 "reason": "Coluna nova."},
+                {"file": "0052_key.py", "severity": "breaking",
+                 "operation": "ADD UNIQUE INDEX", "reason": "Índice único."},
+                {"file": "0052_key.py", "severity": "safe", "operation": "AddField",
+                 "reason": "Campo novo."},
+            ],
+        }
+        lines = [
+            line
+            for line in build_slack_text(result, "http://pr", "T", "1", "a").splitlines()
+            if line.startswith("• ")
+        ]
+        assert lines == [
+            "• 🔴 *Breaking Change* · `0052_key.py` — `ADD UNIQUE INDEX`: Índice único.",
+            "• 🟢 *Safe Change* · `0052_key.py` — `ADD COLUMN`: Coluna nova.",
+            "• 🟢 *Safe Change* · `0052_key.py` — `AddField`: Campo novo.",
+        ]
+
+    @pytest.mark.parametrize(
+        "severity", [s for s in Severity if s is not Severity.NONE], ids=lambda s: s.value
+    )
+    def test_the_line_label_is_the_one_the_headline_uses(self, severity):
+        meta = presentation(severity)
+        result = {
+            "highest_severity": severity.value,
+            "items": [{"file": "a.sql", "severity": severity.value, "operation": "OP",
+                       "reason": "Razão."}],
+        }
+        text = build_slack_text(result, "http://pr", "T", "1", "a")
+        assert f"• {meta.emoji} *{meta.label}* · `a.sql` — `OP`: Razão." in text
 
     def test_none_severity_items_excluded_from_reasons(self):
         result = {
@@ -618,6 +657,30 @@ class TestCollectDecidesWhoGetsThrough:
         assert outputs["unmatched_files"] == "db/migrate/20260904_add_column.rb"
         assert "::warning::db/migrate/20260904_add_column.rb" in process.stdout
 
+    def test_a_doctrine_migration_no_glob_catches_becomes_a_warning(self, tmp_path):
+        """O `migration_paths` sobrescrito sem o glob do Doctrine.
+
+        `Migrations/<banco>/Version*.php` não está sob `migrations/` minúsculo e
+        não começa com timestamp, então nenhuma das duas formas do suspeito o
+        alcançava, e o arquivo passava sem aviso.
+        """
+        doctrine = "Migrations/mysql/Version20260101120000.php"
+        process, outputs = _run_collect(
+            tmp_path, changed=f"{doctrine}\nREADME.md", paths="**/*.sql"
+        )
+        assert process.returncode == 0
+        assert outputs["unmatched_files"] == doctrine
+        assert f"::warning::{doctrine}" in process.stdout
+
+    def test_the_doctrine_runner_is_not_a_suspect(self, tmp_path):
+        # O `VersionHelper.php` do runner mora ao lado das migrações; o `20` do
+        # glob o deixa de fora, e o suspeito tem que deixar também.
+        process, outputs = _run_collect(
+            tmp_path, changed="Migrations/Migrator/VersionHelper.php", paths="**/*.sql"
+        )
+        assert process.returncode == 0
+        assert outputs == {"has_files": "false"}
+
     def test_a_pr_without_migration_says_nothing(self, tmp_path):
         process, outputs = _run_collect(tmp_path, changed="README.md")
         assert process.returncode == 0
@@ -773,8 +836,9 @@ class TestSlackTextNeverEchoesMigrationData:
             "7",
             "dev",
         )
-        assert text.startswith("🟠 *Não classificado* — o classificador não entendeu")
-        assert "• `db/0007_backfill.sql` — `INSERT`: " in text
+        assert text.startswith("🟡 *Mudança Controlada* detectada em migração de banco")
+        assert "• 🟡 *Mudança Controlada* · `db/0007_backfill.sql` — `INSERT`: " in text
+        assert "migração de dados" in text
 
     def test_bare_value_in_a_procedure_call_does_not_reach_slack_either(self):
         findings = classify_sql("CALL migrate_subject(12345678900);")
@@ -783,7 +847,7 @@ class TestSlackTextNeverEchoesMigrationData:
             _result_from_findings("db/0008_call.sql", findings), "http://pr", "T", "8", "dev"
         )
         assert "12345678900" not in text
-        assert "• `db/0008_call.sql` — `CALL`: " in text
+        assert "• 🟠 *Não classificado* · `db/0008_call.sql` — `CALL`: " in text
 
     def test_a_real_drop_and_a_real_add_do_not_get_the_same_colour(self):
         # O sintoma que abriu esta entrega: DROP COLUMN e ADD COLUMN opcional

@@ -208,6 +208,10 @@ def build_slack_text(
     qual operação. Vale para todas as severidades porque a pergunta "onde?" é a
     mesma nas cinco.
 
+    A linha abre com a severidade do próprio item, no emoji e no rótulo do
+    cabeçalho. Um arquivo com um índice único e duas adições rende três linhas, e
+    sem isso o resumo dizia "1 breaking, 2 safe" sem dizer qual era qual.
+
     Nada aqui inventa texto a partir do conteúdo da migração. Razão e operação
     chegam prontas dos parsers de `detect/`, que já cortam valores antes de
     citar um statement — migração de dados carrega CPF de paciente e este texto
@@ -242,11 +246,13 @@ def build_slack_text(
     kept: list[str] = []
     used = 0
     for item in reported:
+        item_severity = to_severity(item.get("severity"))
+        item_meta = presentation(item_severity)
         line = (
-            f"• {ref(item.get('file') or '')} — "
+            f"• {item_meta.emoji} *{item_meta.label}* · {ref(item.get('file') or '')} — "
             f"{ref(item.get('operation') or '')}: {item['reason']}"
         )
-        blocking = severity_rank(to_severity(item.get("severity"))) >= blocks
+        blocking = severity_rank(item_severity) >= blocks
         # A lista vem do pior para o mais brando, então o primeiro benigno que
         # não couber garante que nenhum dos seguintes cabe.
         if not blocking and used + len(line) + 1 > BENIGN_BUDGET_CHARS:
