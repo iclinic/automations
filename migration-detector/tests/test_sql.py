@@ -655,6 +655,35 @@ class TestDataVerbsAreControlled:
     def test_a_where_inside_a_quoted_name_does_not_count_as_a_filter(self):
         assert severity_of('DELETE FROM "audit WHERE log"') is Severity.BREAKING
 
+    def test_a_where_inside_a_subquery_does_not_count_as_a_filter(self):
+        # O `WHERE` filtra a subquery, não o `DELETE`: sem filtro próprio, o
+        # `USING` do PostgreSQL apaga a tabela inteira quando a subquery volta
+        # alguma linha.
+        statement = (
+            "DELETE FROM bookings_booking USING "
+            "(SELECT id FROM bookings_slot WHERE closed) AS s"
+        )
+        assert severity_of(statement) is Severity.BREAKING
+
+    def test_a_where_with_a_subquery_still_filters(self):
+        statement = (
+            "DELETE FROM bookings_booking WHERE slot_id IN "
+            "(SELECT id FROM bookings_slot WHERE closed)"
+        )
+        assert severity_of(statement) is Severity.CONTROLLED
+
+    @pytest.mark.parametrize(
+        "statement",
+        [
+            "DELETE FROM bookings_booking LIMIT 1",
+            "DELETE FROM bookings_booking ORDER BY id LIMIT 1000",
+        ],
+    )
+    def test_a_delete_bounded_by_limit_is_not_the_whole_table(self, statement):
+        # O `DELETE ... LIMIT` do MySQL apaga no máximo N linhas. Dizer que
+        # apagou todas seria afirmar o que o statement não faz.
+        assert severity_of(statement) is Severity.CONTROLLED
+
     def test_alter_table_with_an_unrecognized_action_is_unknown(self):
         finding = classify_statement("ALTER TABLE orders DISABLE TRIGGER ALL")
         assert finding.severity is Severity.UNKNOWN

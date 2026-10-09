@@ -572,11 +572,29 @@ def _refine_alter_type(masked: str) -> _Rule | None:
     return None
 
 
+def _top_level(masked: str) -> str:
+    """O texto com o conteúdo de todo parêntese apagado, no mesmo comprimento."""
+    depth = 0
+    out: list[str] = []
+    for char in masked:
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth = max(depth - 1, 0)
+        elif depth:
+            char = " "
+        out.append(char)
+    return "".join(out)
+
+
 def _refine_delete(masked: str) -> _Rule | None:
     # Sem `WHERE` o `DELETE` é um `TRUNCATE` escrito de outro jeito, e sai com a
     # mesma severidade dele. O `WHERE` é procurado no texto mascarado: dentro de
-    # um literal ou de um nome citado ele não filtra nada.
-    if not re.search(r"\bWHERE\b", masked, re.I):
+    # um literal ou de um nome citado ele não filtra nada. E só no nível de
+    # cima: o `WHERE` de uma subquery filtra a subquery, não o `DELETE`. O
+    # `LIMIT` do MySQL também limita, e com ele o statement apaga no máximo N
+    # linhas, não a tabela.
+    if not re.search(r"\b(?:WHERE|LIMIT)\b", _top_level(masked), re.I):
         return _Rule(
             Severity.BREAKING,
             "Todas as linhas da tabela {name} apagadas por DELETE sem WHERE — "

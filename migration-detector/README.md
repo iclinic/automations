@@ -209,7 +209,8 @@ mesma migração de dados escrita em SQL cru, `INSERT`, `UPDATE` e `DELETE` com
 `breaking` — remoção de coluna ou de tabela (`RemoveField`, `DeleteModel`,
 `op.drop_column`, `op.drop_table`, `DROP COLUMN`, `DROP TABLE`); renomeação de
 qualquer das duas; mudança de tipo; coluna que passou a `NOT NULL`; coluna que
-ficou mais curta; `TRUNCATE`, e o `DELETE` sem `WHERE`, que tem o mesmo efeito;
+ficou mais curta; `TRUNCATE`, e o `DELETE` sem `WHERE` nem `LIMIT` no nível
+do statement (o de uma subquery não conta), que tem o mesmo efeito;
 e todo índice ou constraint **único** novo
 (`AddConstraint(UniqueConstraint)`, `op.create_unique_constraint`,
 `op.create_index(unique=True)`, `CREATE UNIQUE INDEX`, `ADD CONSTRAINT ...
