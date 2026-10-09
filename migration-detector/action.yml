@@ -161,8 +161,11 @@ runs:
         # que a ADR 0001 põe na lista do que não é negociável, e ela fecha a
         # classe que o `**/migrations/*.ts` do default fecha só para um caso.
         # A extensão entra na regex para não transformar `assets/20240101_logo.png`
-        # em suspeita de migração.
-        SUSPECT_REGEX='(^|/)(migrations|alembic/versions)/[^/]*\.(py|ts|js|rb|sql|php)$|(^|/)[0-9]{8,}[-_][^/]*\.(py|ts|js|rb|sql|php)$'
+        # em suspeita de migração. A terceira forma é a do Doctrine:
+        # `Migrations/<banco>/Version<timestamp>.php` não cai em nenhuma das
+        # outras duas, e os dígitos depois de `Version` deixam o
+        # `VersionHelper.php` do runner de fora.
+        SUSPECT_REGEX='(^|/)(migrations|alembic/versions)/[^/]*\.(py|ts|js|rb|sql|php)$|(^|/)[0-9]{8,}[-_][^/]*\.(py|ts|js|rb|sql|php)$|(^|/)Migrations/[^/]+/Version[0-9]{8,}\.php$'
 
         # Toda saída do step passa por aqui. A guarda do webhook depende de o PR
         # ter migração ou não, e uma saída que a pulasse publicaria `has_files`

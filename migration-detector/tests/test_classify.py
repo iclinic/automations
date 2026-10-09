@@ -657,6 +657,30 @@ class TestCollectDecidesWhoGetsThrough:
         assert outputs["unmatched_files"] == "db/migrate/20260904_add_column.rb"
         assert "::warning::db/migrate/20260904_add_column.rb" in process.stdout
 
+    def test_a_doctrine_migration_no_glob_catches_becomes_a_warning(self, tmp_path):
+        """O `migration_paths` sobrescrito sem o glob do Doctrine.
+
+        `Migrations/<banco>/Version*.php` não está sob `migrations/` minúsculo e
+        não começa com timestamp, então nenhuma das duas formas do suspeito o
+        alcançava, e o arquivo passava sem aviso.
+        """
+        doctrine = "Migrations/mysql/Version20260101120000.php"
+        process, outputs = _run_collect(
+            tmp_path, changed=f"{doctrine}\nREADME.md", paths="**/*.sql"
+        )
+        assert process.returncode == 0
+        assert outputs["unmatched_files"] == doctrine
+        assert f"::warning::{doctrine}" in process.stdout
+
+    def test_the_doctrine_runner_is_not_a_suspect(self, tmp_path):
+        # O `VersionHelper.php` do runner mora ao lado das migrações; o `20` do
+        # glob o deixa de fora, e o suspeito tem que deixar também.
+        process, outputs = _run_collect(
+            tmp_path, changed="Migrations/Migrator/VersionHelper.php", paths="**/*.sql"
+        )
+        assert process.returncode == 0
+        assert outputs == {"has_files": "false"}
+
     def test_a_pr_without_migration_says_nothing(self, tmp_path):
         process, outputs = _run_collect(tmp_path, changed="README.md")
         assert process.returncode == 0
