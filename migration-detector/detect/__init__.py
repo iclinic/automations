@@ -2,16 +2,19 @@
 
 Este módulo é o dispatch: dado um caminho, decide **qual parser lê o arquivo** e
 devolve os `Finding` dele. É a única porta de entrada do pacote para quem está
-de fora — `classify.py` não importa `sql`, `django`, `alembic` nem `typeorm`
-direto.
+de fora — `classify.py` não importa `sql`, `django`, `alembic`, `typeorm` nem
+`doctrine` direto.
 
 O dispatch é uma tabela, `STACKS`, e não uma cadeia de `if`. Cada linha diz três
 coisas: por qual extensão o arquivo entra, qual marcador de conteúdo confirma o
 stack, e quem classifica.
 
 Extensão sozinha resolve `.sql`. Não resolve `.py`, que é onde moram Django e
-Alembic; e nem `.ts`, onde o TypeORM divide o glob `**/migrations/*.ts` com
-qualquer outro migrador de TypeScript. Daí a coluna do marcador.
+Alembic; nem `.ts`, onde o TypeORM divide o glob `**/migrations/*.ts` com
+qualquer outro migrador de TypeScript; nem `.php`, onde o glob do Doctrine casa
+tanto a migração quanto o **gerador** de migrações do consumidor, que traz
+`extends AbstractMigration` escrito por extenso dentro de um heredoc. Daí a
+coluna do marcador.
 
 
 Django ou Alembic: por que o sinal é o conteúdo, e não o caminho
@@ -40,11 +43,15 @@ runtime do framework**, não uma convenção:
 - o Alembic chama `module.upgrade()`, então o marcador é declarar uma função
   `upgrade`;
 - o TypeORM exige `implements MigrationInterface`, então é esse o marcador. Por
-  texto, e não por AST, porque o pacote não parseia TypeScript.
+  texto, e não por AST, porque o pacote não parseia TypeScript;
+- o Doctrine só executa subclasse de `AbstractMigration`, então é esse o
+  marcador — mas lido **em posição de código**, sobre o texto que o scanner do
+  `doctrine.py` já apagou. É o que separa a migração do gerador que a escreve.
 
 Os dois marcadores de `.py` são as funções `declares_migration_class` e
-`declares_upgrade`, que moram ao lado do portão de confiança de cada parser e
-enxergam exatamente o que ele enxerga. Isso importa nas duas direções. Um
+`declares_upgrade`, e o de `.php` é `doctrine.declares_migration`: todos moram
+ao lado do portão de confiança do seu parser e enxergam exatamente o que ele
+enxerga. Isso importa nas duas direções. Um
 marcador mais **largo** que o portão manda para o parser um arquivo sobre o qual
 ele não tem o que dizer, e a resposta volta lista vazia; um marcador mais
 **estreito** deixa passar batido um arquivo que o parser classificaria como
@@ -93,9 +100,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Callable
 
-from . import alembic, django, history, sql, typeorm
+from . import alembic, django, doctrine, history, sql, typeorm
 from ._reading import declares_migration_class
 from .alembic import declares_upgrade
+from .doctrine import declares_migration as declares_doctrine_migration
 from .severity import MANUAL, Finding, Severity
 
 __all__ = [
@@ -161,6 +169,23 @@ def _is_typeorm(source: str) -> bool:
     return "MigrationInterface" in source
 
 
+def _is_doctrine(source: str) -> bool:
+    """Estende `AbstractMigration`, em posição de código? É o que o Doctrine executa.
+
+    O marcador é `doctrine.declares_migration`, e ele mora no parser porque
+    precisa do scanner do parser: o consumidor tem um **gerador de migrações**
+    que monta o arquivo novo dentro de um heredoc, e esse heredoc contém
+    `extends AbstractMigration` e `public function up(Schema $schema): void`
+    escritos por extenso. Um marcador por substring — como o do TypeORM, que
+    pode ser um porque nenhum arquivo do consumidor de lá gera TypeScript —
+    leria o gerador como migração.
+
+    Rodando sobre o texto que o scanner apagou, o marcador vê exatamente o que o
+    parser vê: dentro do heredoc não há código, então o gerador não casa.
+    """
+    return declares_doctrine_migration(source)
+
+
 _LINE_COMMENT = re.compile(r"//[^\n]*")
 
 
@@ -197,6 +222,10 @@ def _classify_typeorm(source: str, path: Path) -> list[Finding]:
 
 def _classify_alembic(source: str, path: Path) -> list[Finding]:
     return alembic.classify_migration(source)
+
+
+def _classify_doctrine(source: str, path: Path) -> list[Finding]:
+    return doctrine.classify_migration(source)
 
 
 def _classify_django(source: str, path: Path) -> list[Finding]:
@@ -239,10 +268,11 @@ STACKS: tuple[_Stack, ...] = (
     # `.sql` não tem marcador porque não precisa: `sql.py` classifica todo
     # statement e devolve `unknown` para o verbo que não reconhece, então um
     # `.sql` de dialeto estranho não some — ele aparece como `unknown` vindo do
-    # parser. Os outros três precisam, cada um pelo contrato de runtime do seu
+    # parser. Os outros quatro precisam, cada um pelo contrato de runtime do seu
     # framework.
     _Stack("sql", ".sql", None, _classify_sql),
     _Stack("typeorm", ".ts", _is_typeorm, _classify_typeorm),
+    _Stack("doctrine", ".php", _is_doctrine, _classify_doctrine),
     _Stack("django", ".py", _is_django, _classify_django),
     _Stack("alembic", ".py", _is_alembic, _classify_alembic),
 )
@@ -322,10 +352,10 @@ def _select(path: Path, source: str) -> _Stack | str | None:
     # o pior defeito possível neste pacote:
     #
     #   - o arquivo não declara operação nenhuma — `__init__.py` de um pacote
-    #     `migrations/`, módulo auxiliar, barrel de TypeScript. Django, Alembic e
-    #     TypeORM também o ignorariam. Não é uma migração;
+    #     `migrations/`, módulo auxiliar, barrel de TypeScript. Django, Alembic,
+    #     TypeORM e Doctrine também o ignorariam. Não é uma migração;
     #   - o arquivo declara operações num framework que este pacote não conhece —
-    #     yoyo, South, peewee, Knex, Prisma. Ele casou `migration_paths`, então
+    #     yoyo, South, peewee, Knex, Prisma, Phinx. Ele casou `migration_paths`, então
     #     alguém o considera migração. Devolver lista vazia aqui faria um PR que
     #     dropa coluna terminar verde com `has_db_change=false`, que é
     #     exatamente o bug que esta entrega existe para matar.

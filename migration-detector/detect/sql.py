@@ -188,10 +188,12 @@ _LONG_NUMBER = re.compile(r"\d{4,}")
 def _echo(raw: str, limit: int = 120) -> str:
     """Statement em uma linha para o Slack, cortado antes do primeiro valor.
 
-    O corte não é cosmético. Statement não reconhecido cai aqui, `INSERT` e
-    `UPDATE` são statements não reconhecidos, e migração de dados no consumidor
-    Django/MySQL carrega dado de paciente. A razão vai para um canal do Slack,
-    então nenhum valor pode entrar nela.
+    O corte não é cosmético. Statement não reconhecido cai aqui — um `REPLACE
+    INTO` ou um `CALL` de procedure —, e SQL que mexe em dado carrega dado de
+    paciente, no consumidor Django/MySQL e nas duas bases do consumidor Doctrine.
+    A razão vai para um canal do Slack, então nenhum valor pode entrar nela.
+    (`INSERT`, `UPDATE` e `DELETE` têm linha na tabela e não passam por aqui: a
+    razão deles cita só a tabela.)
 
     São dois cortes porque um valor chega de duas formas. Entre aspas é o caso
     comum. Solto é o que `CALL migrate_subject(12345678900)` faz: sem aspa
@@ -199,11 +201,21 @@ def _echo(raw: str, limit: int = 120) -> str:
     o limiar — `varchar(255)` e `NUMERIC(10,2)` passam inteiros, CPF, CNPJ e id
     não. O que o time de dados precisa ver aqui é o verbo que o classificador
     não entendeu, não o dado que ele carregava.
+
+    **O corte vale para as três aspas, e não só para a simples.** Era só a
+    simples, e o furo é de dialeto: `"..."` delimita identificador no PostgreSQL,
+    mas no MySQL — sem `ANSI_QUOTES`, que é o default — delimita **string**, e
+    `INSERT INTO subjects (name) VALUES ("Maria Silva")` publicava o nome do
+    paciente inteiro. Este módulo atende os dois dialetos ao mesmo tempo e não
+    recebe dica de qual é: das duas leituras possíveis de `"`, ele tem que
+    assumir a perigosa. O preço é o nome do objeto sair do trecho ecoado quando
+    ele estava entre aspas — e o nome do objeto, quando o statement é
+    reconhecido, quem cita é `ref()`, com crase e sem aspa.
     """
     number = _LONG_NUMBER.search(raw)
     cut = min(
         next(
-            (start for kind, start, _ in _spans(raw) if kind == "quoted" and raw[start] == "'"),
+            (start for kind, start, _ in _spans(raw) if kind == "quoted"),
             len(raw),
         ),
         number.start() if number else len(raw),
@@ -560,6 +572,42 @@ def _refine_alter_type(masked: str) -> _Rule | None:
     return None
 
 
+def _top_level(masked: str) -> str:
+    """O texto com o conteúdo de todo parêntese apagado, no mesmo comprimento."""
+    depth = 0
+    out: list[str] = []
+    for char in masked:
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth = max(depth - 1, 0)
+        elif depth:
+            char = " "
+        out.append(char)
+    return "".join(out)
+
+
+def _refine_delete(masked: str) -> _Rule | None:
+    # Sem `WHERE` o `DELETE` é um `TRUNCATE` escrito de outro jeito, e sai com a
+    # mesma severidade dele. O `WHERE` é procurado no texto mascarado: dentro de
+    # um literal ou de um nome citado ele não filtra nada. E só no nível de
+    # cima: o `WHERE` de uma subquery filtra a subquery, não o `DELETE`. O
+    # `LIMIT` do MySQL também limita, e com ele o statement apaga no máximo N
+    # linhas, não a tabela.
+    if not re.search(r"\b(?:WHERE|LIMIT)\b", _top_level(masked), re.I):
+        return _Rule(
+            Severity.BREAKING,
+            "Todas as linhas da tabela {name} apagadas por DELETE sem WHERE — "
+            "quem lê essa tabela perde os dados.",
+        )
+    return None
+
+
+# Migração de dados escrita em SQL cru vale o mesmo que o `RunPython` de dados do
+# Django: não muda o schema, mas mexe em linha que alguém lê.
+_DATA_MIGRATION = "migração de dados, sem DDL. Confirmar o volume e o impacto com o time de dados."
+
+
 @dataclass(frozen=True)
 class _Statement:
     head: str
@@ -595,6 +643,22 @@ _STATEMENT_RULES: tuple[_Statement, ...] = (
             "Todas as linhas da tabela {name} apagadas — quem lê essa tabela perde os dados.",
         ),
         name_after=r"\s*(?:\bTABLE\b\s*)?(?:\bONLY\b\s*)?",
+    ),
+    _Statement(
+        r"INSERT\b",
+        _Rule(Severity.CONTROLLED, "Linhas inseridas em {name} — " + _DATA_MIGRATION),
+        name_after=r"\s*(?:\bIGNORE\b\s*)?(?:\bINTO\b\s*)?",
+    ),
+    _Statement(
+        r"UPDATE\b",
+        _Rule(Severity.CONTROLLED, "Linhas de {name} atualizadas — " + _DATA_MIGRATION),
+        name_after=r"\s*(?:\bIGNORE\b\s*)?(?:\bONLY\b\s*)?",
+    ),
+    _Statement(
+        r"DELETE\b",
+        _Rule(Severity.CONTROLLED, "Linhas de {name} removidas — " + _DATA_MIGRATION),
+        name_after=r"\s*(?:\bFROM\b\s*)?(?:\bONLY\b\s*)?",
+        refine=_refine_delete,
     ),
     _Statement(
         r"CREATE\s+(?:UNIQUE\s+)?INDEX\b",
